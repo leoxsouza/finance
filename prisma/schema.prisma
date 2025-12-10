@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Envelope {
+  id           Int           @id @default(autoincrement())
+  name         String
+  percentage   Float
+  Transaction  Transaction[]
+}
+
+model MonthlyBudget {
+  id     Int    @id @default(autoincrement())
+  month  String @unique // YYYY-MM
+  income Float
+}
+
+model Transaction {
+  id          Int        @id @default(autoincrement())
+  date        DateTime
+  description String
+  value       Float
+  type        String     // IN | OUT
+  envelopeId  Int?
+  createdAt   DateTime   @default(now())
+  Envelope    Envelope?  @relation(fields: [envelopeId], references: [id])
+}

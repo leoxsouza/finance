@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background-color: #f8fafc;
+  color: #0f172a;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.progress-root {
+  width: 100%;
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background-color: #e2e8f0;
+  appearance: none;
+}
+
+.progress-root::-webkit-progress-bar {
+  background-color: transparent;
+}
+
+.progress-root::-webkit-progress-value {
+  background-image: linear-gradient(90deg, #10b981, #0f172a);
+  border-radius: 999px;
+}
+
+.progress-root::-moz-progress-bar {
+  background-image: linear-gradient(90deg, #10b981, #0f172a);
+  border-radius: 999px;
+}
+
+.progress-danger::-webkit-progress-value,
+.progress-danger::-moz-progress-bar {
+  background-image: linear-gradient(90deg, #f97316, #dc2626);
+}
