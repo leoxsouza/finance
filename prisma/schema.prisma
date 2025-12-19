@@ -27,6 +27,17 @@ model Transaction {
   value       Float
   type        String     // IN | OUT
   envelopeId  Int?
+  transactionImportId Int?
   createdAt   DateTime   @default(now())
   Envelope    Envelope?  @relation(fields: [envelopeId], references: [id])
+  TransactionImport TransactionImport? @relation(fields: [transactionImportId], references: [id])
+}
+
+model TransactionImport {
+  id        Int           @id @default(autoincrement())
+  fileHash  String        @unique
+  fileName  String
+  fileSize  Int
+  createdAt DateTime      @default(now())
+  Transaction Transaction[]
 }

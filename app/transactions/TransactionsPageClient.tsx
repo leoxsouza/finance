@@ -2,10 +2,21 @@
 
 import { useCallback, useMemo, useState, useTransition } from "react";
 import type { ChangeEvent, FormEvent } from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import Input from "@/components/ui/input";
 import Select from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Table,
   TableBody,
@@ -14,7 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import CsvImportPanel from "./components/CsvImportPanel";
+import CsvImportButton from "./components/CsvImportButton";
 import type { EnvelopeOption, TransactionRow } from "./types";
 
 type TransactionsPageClientProps = {
@@ -76,6 +87,8 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
   const [formError, setFormError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [transactionPendingDelete, setTransactionPendingDelete] = useState<TransactionRow | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [isSubmitting, startSubmitTransition] = useTransition();
   const [isRefreshing, startRefreshTransition] = useTransition();
@@ -134,7 +147,9 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
           const data = (await response.json()) as TransactionRow[];
           setTransactions(data);
         } catch (error) {
-          setListError(error instanceof Error ? error.message : "Unexpected error while fetching transactions");
+          const message = error instanceof Error ? error.message : "Unexpected error while fetching transactions";
+          setListError(message);
+          toast.error("Unable to refresh transactions", { description: message });
         }
       });
     },
@@ -145,6 +160,31 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
     const nextFilters = { ...filters, ...partial };
     setFilters(nextFilters);
     refreshTransactions(nextFilters);
+  };
+
+  const shiftMonth = (month: string, deltaMonths: number) => {
+    const [yearPart, monthPart] = month.split("-");
+    const year = Number(yearPart);
+    const monthIndex = Number(monthPart) - 1;
+
+    if (!Number.isInteger(year) || !Number.isInteger(monthIndex)) {
+      return month;
+    }
+
+    const date = new Date(Date.UTC(year, monthIndex, 1));
+    date.setUTCMonth(date.getUTCMonth() + deltaMonths);
+
+    const nextYear = date.getUTCFullYear();
+    const nextMonth = String(date.getUTCMonth() + 1).padStart(2, "0");
+    return `${nextYear}-${nextMonth}`;
+  };
+
+  const goToPreviousMonth = () => {
+    handleFilterChange({ month: shiftMonth(filters.month, -1) });
+  };
+
+  const goToNextMonth = () => {
+    handleFilterChange({ month: shiftMonth(filters.month, 1) });
   };
 
   const handleFormChange = (partial: Partial<TransactionFormState>) => {
@@ -193,8 +233,11 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
 
         resetForm();
         refreshTransactions(filters);
+        toast.success("Transaction created", { description: "Your transaction was saved successfully." });
       } catch (error) {
-        setFormError(error instanceof Error ? error.message : "Unexpected error while saving transaction");
+        const message = error instanceof Error ? error.message : "Unexpected error while saving transaction";
+        setFormError(message);
+        toast.error("Unable to create transaction", { description: message });
       }
     });
   };
@@ -203,34 +246,82 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
     handleFormChange({ [field]: event.target.value } as Partial<TransactionFormState>);
   };
 
-  const handleDelete = (transaction: TransactionRow) => {
-    const confirmed = window.confirm(`Delete transaction #${transaction.id}? This action cannot be undone.`);
-    if (!confirmed) {
-      return;
-    }
+  const openDeleteDialog = (transaction: TransactionRow) => {
+    setTransactionPendingDelete(transaction);
+    setDeleteDialogOpen(true);
+  };
 
+  const closeDeleteDialog = () => {
+    setDeleteDialogOpen(false);
+    setTransactionPendingDelete(null);
+  };
+
+  const handleDelete = (transaction: TransactionRow) => {
     setDeleteError(null);
     setDeletingId(transaction.id);
 
-    fetch(`/api/transactions?id=${transaction.id}`, {
-      method: "DELETE",
-    })
-      .then((response) => {
+    void (async () => {
+      try {
+        const response = await fetch(`/api/transactions?id=${transaction.id}`, {
+          method: "DELETE",
+        });
+
         if (!response.ok) {
-          return response.json().then((payload) => {
-            throw new Error(payload.error ?? "Unable to delete transaction");
-          });
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.error ?? "Unable to delete transaction");
         }
+
         refreshTransactions(filters);
-      })
-      .catch((error) => {
-        setDeleteError(error instanceof Error ? error.message : "Unexpected error while deleting transaction");
-      })
-      .finally(() => setDeletingId((current) => (current === transaction.id ? null : current)));
+        toast.success("Transaction deleted", { description: `Transaction #${transaction.id} was deleted.` });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unexpected error while deleting transaction";
+        setDeleteError(message);
+        toast.error("Unable to delete transaction", { description: message });
+      } finally {
+        setDeletingId((current) => (current === transaction.id ? null : current));
+      }
+    })();
   };
 
   return (
     <div className="space-y-8">
+      <AlertDialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeDeleteDialog();
+            return;
+          }
+          setDeleteDialogOpen(true);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete transaction?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone.
+              {transactionPendingDelete
+                ? ` This will permanently delete “${transactionPendingDelete.description}” (#${transactionPendingDelete.id}).`
+                : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingId !== null}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={transactionPendingDelete === null || deletingId !== null}
+              className="bg-red-600 hover:bg-red-500"
+              onClick={(event) => {
+                event.preventDefault();
+                if (!transactionPendingDelete) return;
+                handleDelete(transactionPendingDelete);
+                closeDeleteDialog();
+              }}
+            >
+              {deletingId !== null ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -299,107 +390,146 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
             <Button type="button" variant="ghost" disabled={isSubmitting} onClick={resetForm}>
               Clear
             </Button>
+            <CsvImportButton
+              onImportStart={() => undefined}
+              onImportResult={(result) => {
+                if (!result.ok) {
+                  toast.error("CSV import failed", { description: result.error });
+                  return;
+                }
+
+                const summary = result.summary;
+
+                if (summary.overwritten) {
+                  toast.success("CSV re-imported", {
+                    description: "Previous imported transactions for this file were replaced.",
+                  });
+                }
+
+                const baseMessage = `Created: ${summary.created}. Skipped: ${summary.skipped}.`;
+                const message = summary.errors.length > 0 ? `${baseMessage} Errors: ${summary.errors.length}.` : baseMessage;
+
+                toast.success(summary.overwritten ? "CSV re-imported" : "CSV import complete", {
+                  description: message,
+                });
+              }}
+              onImportComplete={() => refreshTransactions(filters)}
+            />
+          </div>
+        </form>
+      </section>
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <form className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700">Month</label>
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="ghost" size="sm" onClick={goToPreviousMonth} aria-label="Previous month">
+                  &lt;
+                </Button>
+                <Input
+                  type="month"
+                  value={filters.month}
+                  onChange={(event) => handleFilterChange({ month: event.target.value })}
+                />
+                <Button type="button" variant="ghost" size="sm" onClick={goToNextMonth} aria-label="Next month">
+                  &gt;
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700">Type</label>
+              <Select
+                options={typeFilterOptions}
+                value={filters.type}
+                onChange={(event) => handleFilterChange({ type: event.target.value as FiltersState["type"] })}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700">Envelope</label>
+              <Select
+                options={envelopeFilterOptions}
+                value={filters.envelopeId}
+                onChange={(event) => handleFilterChange({ envelopeId: event.target.value })}
+              />
+            </div>
           </div>
         </form>
       </section>
 
-      <CsvImportPanel onImportComplete={() => refreshTransactions(filters)} />
+      <div className="flex flex-wrap gap-4 py-4 text-sm text-slate-600">
+        <span>
+          Income: <strong className="text-emerald-600">{currencyFormatter.format(totals.income)}</strong>
+        </span>
+        <span>
+          Expenses: <strong className="text-rose-600">{currencyFormatter.format(totals.expense)}</strong>
+        </span>
+        <span>
+          Balance: <strong className={balance >= 0 ? "text-emerald-600" : "text-rose-600"}>{currencyFormatter.format(balance)}</strong>
+        </span>
+        {isRefreshing && <span className="text-xs uppercase tracking-wider text-slate-500">Updating...</span>}
+      </div>
 
-      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 border-b border-slate-100 pb-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Filters</p>
-            <p className="text-sm text-slate-600">Refine the list by month, type, or envelope.</p>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <Input type="month" value={filters.month} onChange={(event) => handleFilterChange({ month: event.target.value })} />
-            <Select
-              options={typeFilterOptions}
-              value={filters.type}
-              onChange={(event) => handleFilterChange({ type: event.target.value as FiltersState["type"] })}
-            />
-            <Select
-              options={envelopeFilterOptions}
-              value={filters.envelopeId}
-              onChange={(event) => handleFilterChange({ envelopeId: event.target.value })}
-            />
-          </div>
-        </div>
+      {listError && <p className="text-sm text-rose-600">{listError}</p>}
+      {deleteError && <p className="text-sm text-rose-600">{deleteError}</p>}
 
-        <div className="flex flex-wrap gap-4 py-4 text-sm text-slate-600">
-          <span>
-            Income: <strong className="text-emerald-600">{currencyFormatter.format(totals.income)}</strong>
-          </span>
-          <span>
-            Expenses: <strong className="text-rose-600">{currencyFormatter.format(totals.expense)}</strong>
-          </span>
-          <span>
-            Balance: <strong className={balance >= 0 ? "text-emerald-600" : "text-rose-600"}>{currencyFormatter.format(balance)}</strong>
-          </span>
-          {isRefreshing && <span className="text-xs uppercase tracking-wider text-slate-500">Updating...</span>}
-        </div>
-
-        {listError && <p className="text-sm text-rose-600">{listError}</p>}
-        {deleteError && <p className="text-sm text-rose-600">{deleteError}</p>}
-
-        <Table>
-          <TableHeader>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Date</TableHead>
+            <TableHead>Description</TableHead>
+            <TableHead className="text-right">Value</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Envelope</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {transactions.length === 0 ? (
             <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead className="text-right">Value</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Envelope</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableCell colSpan={5} className="py-6 text-center text-sm text-slate-500">
+                No transactions found for the selected filters.
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {transactions.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="py-6 text-center text-sm text-slate-500">
-                  No transactions found for the selected filters.
+          ) : (
+            transactions.map((transaction) => (
+              <TableRow key={transaction.id}>
+                <TableCell>{dateFormatter.format(new Date(transaction.date))}</TableCell>
+                <TableCell>
+                  <div>
+                    <p className="font-medium text-slate-900">{transaction.description}</p>
+                    <p className="text-xs text-slate-500">#{transaction.id}</p>
+                  </div>
+                </TableCell>
+                <TableCell className="text-right font-semibold text-slate-900">
+                  {currencyFormatter.format(transaction.value)}
+                </TableCell>
+                <TableCell>
+                  <span className={transaction.type === "IN" ? "text-emerald-600" : "text-rose-600"}>
+                    {transaction.type === "IN" ? "Income" : "Expense"}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  {transaction.envelopeId
+                    ? envelopeLookup.get(transaction.envelopeId) ?? transaction.envelopeName ?? "—"
+                    : transaction.envelopeName ?? "—"}
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => openDeleteDialog(transaction)}
+                    disabled={deletingId === transaction.id}
+                  >
+                    {deletingId === transaction.id ? "Deleting..." : "Delete"}
+                  </Button>
                 </TableCell>
               </TableRow>
-            ) : (
-              transactions.map((transaction) => (
-                <TableRow key={transaction.id}>
-                  <TableCell>{dateFormatter.format(new Date(transaction.date))}</TableCell>
-                  <TableCell>
-                    <div>
-                      <p className="font-medium text-slate-900">{transaction.description}</p>
-                      <p className="text-xs text-slate-500">#{transaction.id}</p>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right font-semibold text-slate-900">
-                    {currencyFormatter.format(transaction.value)}
-                  </TableCell>
-                  <TableCell>
-                    <span className={transaction.type === "IN" ? "text-emerald-600" : "text-rose-600"}>
-                      {transaction.type === "IN" ? "Income" : "Expense"}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    {transaction.envelopeId
-                      ? envelopeLookup.get(transaction.envelopeId) ?? transaction.envelopeName ?? "—"
-                      : transaction.envelopeName ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => handleDelete(transaction)}
-                      disabled={deletingId === transaction.id}
-                    >
-                      {deletingId === transaction.id ? "Deleting..." : "Delete"}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </section>
+            ))
+          )}
+        </TableBody>
+      </Table>
     </div>
   );
 }

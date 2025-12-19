@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import AppNav from "@/components/layout/AppNav";
+import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
   title: "Personal Finance Manager",
@@ -14,6 +15,7 @@ function RootLayout({ children }: { children: React.ReactNode }) {
         <div className="min-h-screen bg-slate-50">
           <AppNav />
           <main className="mx-auto w-full max-w-6xl px-6 py-10">{children}</main>
+          <Toaster richColors closeButton position="top-right" />
         </div>
       </body>
     </html>

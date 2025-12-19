@@ -1,4 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
 
 import prisma from "@/lib/db";
 import { dedupeExpenseRows, parseExpenseCsv, resolveEnvelopeIds } from "@/lib/csv/transactionImport";
@@ -31,37 +33,93 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = await file.arrayBuffer();
-    const parsed = parseExpenseCsv(buffer);
+    const csvString = Buffer.from(buffer).toString("utf-8");
+    const normalizedCsv = csvString.replace(/\r\n/g, "\n").trim();
+    const fileHash = createHash("sha256").update(normalizedCsv).digest("hex");
+
+    const parsed = parseExpenseCsv(normalizedCsv);
 
     if (parsed.rows.length === 0 && parsed.errors.length > 0) {
-      return NextResponse.json({ created: 0, skipped: 0, errors: parsed.errors }, { status: 400 });
+      return NextResponse.json(
+        {
+          error: "CSV file has no valid rows",
+          created: 0,
+          skipped: 0,
+          errors: parsed.errors,
+        },
+        { status: 400 },
+      );
     }
 
     const { resolved, errors: envelopeErrors } = await resolveEnvelopeIds(parsed.rows, prisma);
 
     if (resolved.length === 0) {
-      return NextResponse.json({ created: 0, skipped: 0, errors: [...parsed.errors, ...envelopeErrors] }, { status: 400 });
+      return NextResponse.json(
+        {
+          error: "Unable to import CSV rows",
+          created: 0,
+          skipped: 0,
+          errors: [...parsed.errors, ...envelopeErrors],
+        },
+        { status: 400 },
+      );
     }
 
     const deduped = dedupeExpenseRows(resolved);
 
-    const created = await prisma.$transaction(
-      deduped.map((row) =>
-        prisma.transaction.create({
-          data: {
-            date: new Date(row.date),
-            description: row.description,
-            value: row.value,
-            type: "OUT",
-            envelopeId: row.envelopeId,
+    const skipped = resolved.length - deduped.length;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const existing = await tx.transactionImport.findUnique({
+        where: { fileHash },
+        select: { id: true },
+      });
+
+      const importRecord = await tx.transactionImport.upsert({
+        where: { fileHash },
+        create: {
+          fileHash,
+          fileName: file.name,
+          fileSize: file.size,
+        },
+        update: {
+          fileName: file.name,
+          fileSize: file.size,
+        },
+        select: { id: true },
+      });
+
+      const overwritten = Boolean(existing);
+
+      if (overwritten) {
+        await tx.transaction.deleteMany({
+          where: {
+            transactionImportId: importRecord.id,
           },
-        }),
-      ),
-    );
+        });
+      }
+
+      const created = await tx.transaction.createMany({
+        data: deduped.map((row) => ({
+          date: new Date(row.date),
+          description: row.description,
+          value: row.value,
+          type: "OUT",
+          envelopeId: row.envelopeId,
+          transactionImportId: importRecord.id,
+        })),
+      });
+
+      return {
+        overwritten,
+        created: created.count,
+      };
+    });
 
     return NextResponse.json({
-      created: created.length,
-      skipped: resolved.length - deduped.length,
+      created: result.created,
+      skipped,
+      overwritten: result.overwritten,
       errors: [...parsed.errors, ...envelopeErrors],
     });
   } catch (error) {
