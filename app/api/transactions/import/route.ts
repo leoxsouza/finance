@@ -60,12 +60,19 @@ export async function POST(request: NextRequest) {
     const { resolved, errors: envelopeErrors } = await resolveEnvelopeIds(parsed.rows, prisma);
 
     if (resolved.length === 0) {
+      const combinedErrors = [...parsed.errors, ...envelopeErrors];
+      const detailsPreview = combinedErrors.slice(0, 3).map((error) => `Row ${error.rowNumber}: ${error.message}`);
+      const detailMessage =
+        detailsPreview.length > 0
+          ? `Fix these issues before retrying — ${detailsPreview.join("; ")}`
+          : "Review the CSV headers and envelope names before retrying.";
+
       return NextResponse.json(
         {
-          error: "Unable to import CSV rows",
+          error: `Unable to import CSV rows. ${detailMessage}`,
           created: 0,
           skipped: 0,
-          errors: [...parsed.errors, ...envelopeErrors],
+          errors: combinedErrors,
         },
         { status: 400 },
       );
