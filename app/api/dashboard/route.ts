@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 
+import { ensureApiAuthenticated } from "@/lib/auth/api";
 import finance from "@/lib/finance";
 
 const monthSchema = z
@@ -9,6 +10,11 @@ const monthSchema = z
   .optional();
 
 export async function GET(request: NextRequest) {
+  const authError = await ensureApiAuthenticated();
+  if (authError) {
+    return authError;
+  }
+
   try {
     const monthParam = monthSchema.parse(request.nextUrl.searchParams.get("month") ?? undefined);
     const month = monthParam ?? finance.getCurrentMonth();

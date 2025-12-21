@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 
+import { ensureApiAuthenticated } from "@/lib/auth/api";
 import prisma from "@/lib/db";
 
 const envelopeBaseSchema = z.object({
@@ -32,6 +33,11 @@ async function ensurePercentageBudget(options: {
 }
 
 export async function GET() {
+  const authError = await ensureApiAuthenticated();
+  if (authError) {
+    return authError;
+  }
+
   try {
     const envelopes = await prisma.envelope.findMany({ orderBy: { id: "asc" } });
     return NextResponse.json(envelopes);
@@ -41,6 +47,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const authError = await ensureApiAuthenticated();
+  if (authError) {
+    return authError;
+  }
+
   try {
     const payload = envelopeBaseSchema.parse(await request.json());
     await ensurePercentageBudget({ percentage: payload.percentage });
@@ -53,6 +64,11 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
+  const authError = await ensureApiAuthenticated();
+  if (authError) {
+    return authError;
+  }
+
   try {
     const payload = envelopeUpsertSchema.parse(await request.json());
     await ensurePercentageBudget({ id: payload.id, percentage: payload.percentage });
@@ -69,6 +85,11 @@ export async function PUT(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const authError = await ensureApiAuthenticated();
+  if (authError) {
+    return authError;
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const id = Number(searchParams.get("id"));

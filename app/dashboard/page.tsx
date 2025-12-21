@@ -5,8 +5,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import Input from "@/components/ui/input";
 import Progress from "@/components/ui/progress";
+import { requireSession } from "@/lib/auth/serverSession";
 import finance from "@/lib/finance";
 import type { DashboardEnvelope } from "@/lib/finance";
+
+export const dynamic = "force-dynamic";
 
 import DashboardChart from "./DashboardChart";
 
@@ -24,6 +27,7 @@ type DashboardPageProps = {
 };
 
 async function DashboardPage({ searchParams }: DashboardPageProps) {
+  await requireSession();
   const rawMonth = typeof searchParams?.month === "string" ? searchParams.month : undefined;
   const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
   const month = rawMonth && monthPattern.test(rawMonth) ? rawMonth : finance.getCurrentMonth();

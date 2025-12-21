@@ -3,9 +3,12 @@ import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import Progress from "@/components/ui/progress";
+import { requireSession } from "@/lib/auth/serverSession";
 import finance from "@/lib/finance";
 import { formatCurrency, formatPercentage } from "@/lib/format";
 import { cn } from "@/lib/utils";
+
+export const dynamic = "force-dynamic";
 
 const CTA_LINKS = [
   { href: "/setup", label: "Configure envelopes", description: "Distribute income across categories" },
@@ -32,6 +35,7 @@ const NEXT_STEPS = [
 ] as const;
 
 async function HomePage() {
+  await requireSession();
   const month = finance.getCurrentMonth();
 
   let dashboard: Awaited<ReturnType<typeof finance.buildDashboard>> | null = null;

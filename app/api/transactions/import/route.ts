@@ -2,12 +2,18 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
 
+import { ensureApiAuthenticated } from "@/lib/auth/api";
 import prisma from "@/lib/db";
 import { dedupeExpenseRows, parseExpenseCsv, resolveEnvelopeIds } from "@/lib/csv/transactionImport";
 
 const MAX_FILE_SIZE_BYTES = 1_000_000; // 1MB
 
 export async function POST(request: NextRequest) {
+  const authError = await ensureApiAuthenticated();
+  if (authError) {
+    return authError;
+  }
+
   try {
     if (!request.headers.get("content-type")?.includes("multipart/form-data")) {
       return NextResponse.json({ error: "Content-Type must be multipart/form-data" }, { status: 415 });

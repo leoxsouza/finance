@@ -3,8 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { signOut, useSession } from "next-auth/react";
 
 import { cn } from "@/lib/utils";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 const NAV_LINKS = [
   {
@@ -27,6 +29,7 @@ const NAV_LINKS = [
 function AppNav() {
   const pathname = usePathname();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const { data: session, status } = useSession();
 
   const isActive = (href: string) => {
     if (href === "/") {
@@ -35,9 +38,34 @@ function AppNav() {
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
+  const isAuthenticated = status === "authenticated";
+  const userEmail = session?.user?.email ?? "You";
+
+  const authAction = isAuthenticated ? (
+    <div className="flex items-center gap-3">
+      <p className="text-sm text-slate-500">Signed in as {userEmail}</p>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        onClick={() => signOut({ callbackUrl: "/login" })}
+        className="whitespace-nowrap"
+      >
+        Sign out
+      </Button>
+    </div>
+  ) : (
+    <Link
+      href="/login"
+      className={cn(buttonVariants({ size: "sm" }), "whitespace-nowrap")}
+    >
+      Login
+    </Link>
+  );
+
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-4">
+      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-6 py-4">
         <Link href="/" className="group flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-base font-semibold text-emerald-700 transition group-hover:bg-emerald-200">
             PF
@@ -59,7 +87,7 @@ function AppNav() {
           <span className="text-lg">{isMobileOpen ? "−" : "+"}</span>
         </button>
 
-        <nav className="hidden gap-1 md:flex">
+        <nav className="hidden flex-1 items-center justify-end gap-3 md:flex">
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
@@ -74,6 +102,7 @@ function AppNav() {
               {link.label}
             </Link>
           ))}
+          {authAction}
         </nav>
       </div>
 
@@ -95,6 +124,32 @@ function AppNav() {
               <p className="text-xs text-slate-500">{link.description}</p>
             </Link>
           ))}
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            {isAuthenticated ? (
+              <div className="space-y-2">
+                <p className="text-sm text-slate-600">Signed in as {userEmail}</p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    setIsMobileOpen(false);
+                    signOut({ callbackUrl: "/login" });
+                  }}
+                >
+                  Sign out
+                </Button>
+              </div>
+            ) : (
+              <Link
+                href="/login"
+                onClick={() => setIsMobileOpen(false)}
+                className={cn(buttonVariants(), "block w-full text-center")}
+              >
+                Login
+              </Link>
+            )}
+          </div>
         </div>
       ) : null}
     </header>

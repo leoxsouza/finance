@@ -1,4 +1,5 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireSession } from "@/lib/auth/serverSession";
 import prisma from "@/lib/db";
 import finance from "@/lib/finance";
 
@@ -14,6 +15,7 @@ const formatCurrency = (value: number) =>
   value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 async function SetupPage() {
+  await requireSession();
   const month = finance.getCurrentMonth();
   const { start, end } = finance.getMonthRange(month);
   const [envelopes, incomeAggregate] = await Promise.all([

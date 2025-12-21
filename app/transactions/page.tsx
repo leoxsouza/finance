@@ -1,3 +1,4 @@
+import { requireSession } from "@/lib/auth/serverSession";
 import prisma from "@/lib/db";
 import finance from "@/lib/finance";
 
@@ -48,6 +49,7 @@ async function getInitialData() {
 }
 
 async function TransactionsPage() {
+  await requireSession();
   const { defaultMonth, envelopes, transactions } = await getInitialData();
 
   return (

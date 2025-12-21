@@ -13,9 +13,20 @@ Simple Next.js 14 + TypeScript application for envelope budgeting, income tracki
    ```bash
    npm install
    ```
-2. Create an `.env` file with the SQLite connection string (the database will be created automatically once Prisma is configured in later tasks):
+2. Create an `.env` file with the SQLite connection string (or your remote database):
    ```bash
    DATABASE_URL="file:./prisma/dev.db"
+   ```
+3. Generate a bcrypt hash for your login password:
+   ```bash
+   node -e "console.log(require('bcryptjs').hashSync('your-password', 12))"
+   ```
+4. Add the authentication env vars (see `.env.example` for all keys):
+   ```bash
+   AUTH_USER_EMAIL="me@example.com"
+   AUTH_USER_PASSWORD_HASH="<paste hash from step 3>"
+   NEXTAUTH_SECRET="<openssl rand -base64 32>"
+   NEXTAUTH_URL="http://localhost:3000"
    ```
 
 ## Development

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 
+import { ensureApiAuthenticated } from "@/lib/auth/api";
 import prisma from "@/lib/db";
 import finance from "@/lib/finance";
 
@@ -39,6 +40,11 @@ const transactionInputSchema = z
   });
 
 export async function DELETE(request: NextRequest) {
+  const authError = await ensureApiAuthenticated();
+  if (authError) {
+    return authError;
+  }
+
   try {
     const query = transactionDeleteQuerySchema.parse(Object.fromEntries(request.nextUrl.searchParams));
 
@@ -72,6 +78,11 @@ const transactionsQuerySchema = z.object({
 });
 
 export async function GET(request: NextRequest) {
+  const authError = await ensureApiAuthenticated();
+  if (authError) {
+    return authError;
+  }
+
   try {
     const query = transactionsQuerySchema.parse(Object.fromEntries(request.nextUrl.searchParams));
 
@@ -110,6 +121,11 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const authError = await ensureApiAuthenticated();
+  if (authError) {
+    return authError;
+  }
+
   try {
     const payload = transactionInputSchema.parse(await request.json());
 
