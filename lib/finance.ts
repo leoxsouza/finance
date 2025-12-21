@@ -98,12 +98,22 @@ function calculateEnvelopeUsage(transactions: TransactionInput[]): EnvelopeUsage
   }, {});
 }
 
+function calculateRecordedIncome(transactions: TransactionInput[]): number {
+  const total = transactions.reduce<number>((sum, transaction) => {
+    if (transaction.type === "IN") {
+      return sum + transaction.value;
+    }
+    return sum;
+  }, 0);
+
+  return Number(total.toFixed(2));
+}
+
 async function buildDashboard(month: string): Promise<DashboardResponse> {
   const safeMonth = month || getCurrentMonth();
   const { start, end } = getMonthRange(safeMonth);
 
-  const [budget, envelopes, transactions] = await Promise.all([
-    prisma.monthlyBudget.findUnique({ where: { month: safeMonth } }),
+  const [envelopes, transactions] = await Promise.all([
     prisma.envelope.findMany({ orderBy: { id: "asc" } }),
     prisma.transaction.findMany({
       where: {
@@ -115,21 +125,7 @@ async function buildDashboard(month: string): Promise<DashboardResponse> {
     }),
   ]);
 
-  if (!budget) {
-    throw new Error("Monthly budget not found for requested month");
-  }
-
-  type TransactionRecord = (typeof transactions)[number];
-
-  let recordedIncome = 0;
-  transactions.forEach((transaction: TransactionRecord) => {
-    if (transaction.type === "IN") {
-      recordedIncome += transaction.value;
-    }
-  });
-  const normalizedIncome = Number(recordedIncome.toFixed(2));
-  const effectiveIncome =
-    normalizedIncome > 0 ? normalizedIncome : budget.income;
+  const effectiveIncome = calculateRecordedIncome(transactions);
 
   const envelopeLimits = calculateEnvelopeLimits(effectiveIncome, envelopes);
   const envelopeUsages = calculateEnvelopeUsage(transactions);

@@ -15,9 +15,19 @@ const formatCurrency = (value: number) =>
 
 async function SetupPage() {
   const month = finance.getCurrentMonth();
-  const [envelopes, budget] = await Promise.all([
+  const { start, end } = finance.getMonthRange(month);
+  const [envelopes, incomeAggregate] = await Promise.all([
     prisma.envelope.findMany({ orderBy: { id: "asc" } }),
-    prisma.monthlyBudget.findUnique({ where: { month } }),
+    prisma.transaction.aggregate({
+      where: {
+        type: "IN",
+        date: {
+          gte: start,
+          lt: end,
+        },
+      },
+      _sum: { value: true },
+    }),
   ]);
 
   const serializableEnvelopes: EnvelopeDTO[] = envelopes.map((envelope) => ({
@@ -27,7 +37,7 @@ async function SetupPage() {
   }));
 
   const envelopeCount = serializableEnvelopes.length;
-  const rawIncome = budget?.income ?? 0;
+  const rawIncome = Number(incomeAggregate._sum.value?.toFixed(2) ?? 0);
   const totalPercentage = serializableEnvelopes.reduce((sum, envelope) => sum + envelope.percentage, 0);
 
   return (
@@ -50,7 +60,7 @@ async function SetupPage() {
             <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 shadow-inner">
               <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Income</dt>
               <dd className="text-lg font-semibold text-slate-900">
-                {budget ? formatCurrency(rawIncome) : "No income set"}
+                {rawIncome > 0 ? formatCurrency(rawIncome) : "No income recorded"}
               </dd>
             </div>
             <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 shadow-inner">
