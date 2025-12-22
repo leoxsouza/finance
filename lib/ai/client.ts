@@ -6,9 +6,241 @@ import { getGeminiApiKey, getGeminiExtractionConfig } from "@/lib/ai/config";
 import { geminiExtractionResponseSchema } from "@/lib/ai/schemas";
 import type { GeminiExtractionResponse } from "@/lib/ai/schemas";
 
-const DEFAULT_USER_PROMPT =
-  "Extraia todas as transações deste PDF. Ignore pagamentos consolidados, resumos, propagandas e tarifas automáticas. " +
-  "Classifique cada linha como crédito ou débito e preserve descrições completas. Retorne em português.";
+const SYSTEM_PROMPT = `
+Você é um especialista em finanças pessoais que segue rigorosamente a metodologia AUVP (A Única Verdade Possível).
+
+Seu papel é interpretar faturas de cartão de crédito brasileiras com o mesmo rigor de um contador humano experiente e conservador.
+
+Seu objetivo é extrair exclusivamente transações financeiras reais, ou seja:
+- compras
+- créditos legítimos
+- estornos
+- ajustes financeiros
+- cashback
+
+Ignore completamente qualquer informação que NÃO represente movimentação financeira real, incluindo:
+- pagamentos de fatura
+- resumos ou totalizadores
+- limites de crédito
+- juros projetados
+- encargos futuros
+- mensagens institucionais
+- propagandas
+- avisos promocionais
+- parcelamentos futuros sem valor financeiro associado
+
+Compras parceladas representam UMA ÚNICA TRANSAÇÃO econômica.
+Parcelas existem apenas como metadados de pagamento e jamais devem ser tratadas como gastos independentes.
+
+Nunca estime valores.
+Se o valor total de uma compra parcelada não estiver explicitamente informado no PDF, deixe o campo "totalAmount" vazio.
+
+Sempre preserve a descrição original da transação, sem abreviações, correções ou interpretações livres.
+
+Classifique cada transação obrigatoriamente em UMA categoria AUVP, escolhida exclusivamente entre:
+- Custos fixos
+- Conforto
+- Prazeres
+- Metas
+- Liberdade Financeira
+- Conhecimento
+
+===========================
+HEURÍSTICAS DE CLASSIFICAÇÃO AUVP
+===========================
+
+Use as heurísticas abaixo como regras de apoio sempre que a categoria não estiver explicitamente clara:
+
+SAÚDE → sempre classifique como Custos fixos quando a descrição mencionar:
+- médicos, clínicas, hospitais, laboratórios, exames ou consultas
+- termos como: DR, DRA, HOSP, HOSPITAL, CLINICA, LAB, EXAME
+- farmácias e drogarias (ex: Drogasil, Droga Raia, Pague Menos, Panvel, Farmácia, Drogaria)
+- planos de saúde, coparticipações ou reembolsos médicos
+
+EDUCAÇÃO → classifique como Conhecimento quando a descrição mencionar:
+- cursos, faculdades, escolas, pós-graduação, MBA
+- plataformas educacionais (Alura, Udemy, Coursera, Udacity, FIAP, DIO)
+- livros, e-books, certificações, provas ou treinamentos profissionais
+
+ALIMENTAÇÃO:
+- supermercado, açougue, hortifruti, padaria recorrente → Custos fixos
+- restaurantes, bares, cafeterias, lanches ocasionais → Prazeres
+- delivery frequente ou recorrente → Conforto
+
+TRANSPORTE:
+- transporte essencial recorrente → Custos fixos
+- Uber, 99, táxi, transporte por conveniência → Conforto
+
+ASSINATURAS E SERVIÇOS DIGITAIS:
+- serviços essenciais (internet, celular, ferramentas de trabalho como Windsurf, ChatGPT) → Custos fixos
+- streaming, entretenimento, apps premium → Conforto
+
+COMPRAS DE BENS:
+- compras necessárias e funcionais → Custos fixos
+- compras para melhorar qualidade de vida → Conforto
+- compras emocionais ou por impulso → Prazeres
+
+VIAGENS:
+- viagens planejadas com objetivo definido (Hoteis, passagens aéreas) → Metas
+
+INVESTIMENTOS:
+- qualquer menção a corretoras, aportes, previdência, renda fixa ou variável → Liberdade Financeira
+
+Em caso de conflito entre heurísticas, priorize esta ordem:
+1) Custos fixos
+2) Conhecimento
+3) Metas
+4) Conforto
+5) Prazeres
+
+Se algo não for claramente uma transação financeira real, ignore.
+Nunca crie categorias fora do padrão AUVP.
+Nunca deixe o campo "type" vazio.
+`;
+
+
+const DEFAULT_USER_PROMPT = `
+Contexto:
+- Leia a fatura completa de cartão de crédito em português do Brasil.
+- Analise TODAS as páginas, incluindo cabeçalho e rodapé.
+- Extraia exclusivamente linhas que representem transações financeiras reais.
+
+Tipos válidos de transação:
+• compras
+• créditos
+• estornos
+• ajustes financeiros
+• cashback
+
+===========================
+REGRAS DE DATA
+===========================
+
+- Datas de compra geralmente aparecem no formato DD/MM.
+- Se o ano não estiver explícito, infira com base no mês/ano da fatura.
+- Se não houver referência clara, assuma o ano de 2025.
+
+===========================
+FEW-SHOT EXAMPLES
+===========================
+
+EXEMPLO 1 — Compra à vista (Prazeres)
+
+Linha no PDF:
+"15/01 AMAZON MKTPLACE BR R$ 129,90"
+
+Saída esperada:
+{
+  "purchaseDate": "2025-01-15",
+  "description": "AMAZON MKTPLACE BR",
+  "amount": -129.90,
+  "type": "Prazeres",
+  "rawLine": "15/01 AMAZON MKTPLACE BR R$ 129,90",
+  "isReversal": false
+}
+
+---
+
+EXEMPLO 2 — Compra parcelada SEM valor total explícito (Conforto)
+
+Linha no PDF:
+"18/01 IFOOD *RESTAURANTE 03/06 R$ 42,50"
+
+Saída esperada:
+{
+  "purchaseDate": "2025-01-18",
+  "description": "IFOOD *RESTAURANTE",
+  "amount": -42.50,
+  "type": "Conforto",
+  "installmentNumber": 3,
+  "installmentCount": 6,
+  "installmentAmount": 42.50,
+  "totalAmount": null,
+  "rawLine": "18/01 IFOOD *RESTAURANTE 03/06 R$ 42,50",
+  "isReversal": false
+}
+
+---
+
+EXEMPLO 3 — Compra parcelada COM valor total explícito (Conhecimento)
+
+Linha no PDF:
+"10/01 ALURA CURSOS 01/12 TOTAL R$ 1.200,00 R$ 100,00"
+
+Saída esperada:
+{
+  "purchaseDate": "2025-01-10",
+  "description": "ALURA CURSOS",
+  "amount": -100.00,
+  "type": "Conhecimento",
+  "installmentNumber": 1,
+  "installmentCount": 12,
+  "installmentAmount": 100.00,
+  "totalAmount": 1200.00,
+  "rawLine": "10/01 ALURA CURSOS 01/12 TOTAL R$ 1.200,00 R$ 100,00",
+  "isReversal": false
+}
+
+---
+
+EXEMPLO 4 — Estorno / crédito
+
+Linha no PDF:
+"22/01 ESTORNO AMAZON MKTPLACE R$ -129,90"
+
+Saída esperada:
+{
+  "purchaseDate": "2025-01-22",
+  "description": "ESTORNO AMAZON MKTPLACE",
+  "amount": 129.90,
+  "type": "Prazeres",
+  "rawLine": "22/01 ESTORNO AMAZON MKTPLACE R$ -129,90",
+  "isReversal": true
+}
+
+---
+
+EXEMPLO 5 — Linha que DEVE ser ignorada
+
+Linha no PDF:
+"22/01 PAGAMENTO DE FATURA R$ -12900,90"
+
+Resultado esperado:
+→ NÃO RETORNAR NENHUM OBJETO
+
+===========================
+FIM DOS EXEMPLOS
+===========================
+
+Para CADA transação válida encontrada no PDF, retorne um objeto com os seguintes campos:
+
+Campos principais:
+- purchaseDate
+- description
+- amount (negativo para despesas, positivo para créditos)
+- type (categoria AUVP obrigatória)
+
+Metadados adicionais (quando aplicável):
+- statementMonth (YYYY-MM)
+- installmentNumber
+- installmentCount
+- installmentAmount
+- totalAmount (somente se explícito no PDF)
+- cardLastDigits
+- rawLine
+- isReversal
+
+===========================
+REGRAS FINAIS OBRIGATÓRIAS
+===========================
+
+1. Nunca consolide, agrupe ou some transações diferentes.
+2. Cada objeto representa exatamente UMA transação financeira.
+3. Ignore completamente qualquer linha que não seja movimentação financeira real.
+4. O número de objetos retornados deve ser exatamente igual ao número de transações válidas encontradas no PDF.
+5. Utilize exclusivamente português brasileiro no retorno.
+`.trim();
+
 
 type ExtractionRequest = {
   pdfBase64: string;
@@ -30,11 +262,11 @@ export async function requestGeminiExtraction({ pdfBase64, promptOverride }: Ext
       schema: geminiExtractionResponseSchema,
       abortSignal: controller.signal,
       temperature,
+      // maxOutputTokens,
       messages: [
         {
           role: "system",
-          content:
-            "Você é um assistente financeiro. Sua tarefa é analisar uma fatura de cartão e retornar apenas as transações individuais.",
+          content: SYSTEM_PROMPT,
         },
         {
           role: "user",

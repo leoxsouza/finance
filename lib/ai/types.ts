@@ -1,9 +1,17 @@
-export type ExtractedTransactionType = "IN" | "OUT";
+export type AuvpCategory =
+  | "Custos fixos"
+  | "Conforto"
+  | "Prazeres"
+  | "Metas"
+  | "Liberdade Financeira"
+  | "Conhecimento";
+
+export type ExtractedTransactionType = AuvpCategory;
 
 export type ExtractedTransactionCandidate = {
-  date: string; // ISO yyyy-mm-dd
+  purchaseDate: string; // ISO yyyy-mm-dd
   description: string;
-  amount: number; // always positive
+  amount: number;
   type: ExtractedTransactionType;
 };
 

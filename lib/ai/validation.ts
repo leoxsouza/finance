@@ -10,24 +10,25 @@ import type {
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-const typeMap: Record<string, ExtractedTransactionType> = {
-  débito: "OUT",
-  debito: "OUT",
-  "débito*": "OUT",
-  crédito: "IN",
-  credito: "IN",
-  "crédito*": "IN",
+const AUVP_KEYWORDS: Record<string, ExtractedTransactionType> = {
+  "custos fixos": "Custos fixos",
+  conforto: "Conforto",
+  prazer: "Prazeres",
+  prazeres: "Prazeres",
+  metas: "Metas",
+  "liberdade financeira": "Liberdade Financeira",
+  conhecimento: "Conhecimento",
 };
 
 export function normalizeGeminiTransaction(raw: GeminiTransaction): ExtractedTransactionCandidate {
   const type = mapType(raw.type);
   const amount = normalizeAmount(raw.amount);
-  const date = normalizeDate(raw.date);
+  const date = normalizeDate(raw.purchaseDate);
 
   return {
     description: raw.description.trim(),
     amount,
-    date,
+    purchaseDate: date,
     type,
   };
 }
@@ -45,7 +46,7 @@ export function validateExtractionResponse(input: unknown): ExtractionValidation
     valid.push({
       description: transaction.description.trim(),
       amount: transaction.amount,
-      date: transaction.date,
+      purchaseDate: transaction.purchaseDate,
       type: transaction.type as ExtractedTransactionType,
     });
     // const result = validateSingleTransaction(transaction, index);
@@ -71,7 +72,7 @@ function validateSingleTransaction(
 
   let normalizedDate: string | null = null;
   try {
-    normalizedDate = normalizeDate(raw.date);
+    normalizedDate = normalizeDate(raw.purchaseDate);
   } catch {
     issues.push({ index, field: "date", message: "Invalid date format" });
   }
@@ -98,7 +99,7 @@ function validateSingleTransaction(
     transaction: {
       description: raw.description.trim(),
       amount: normalizedAmount,
-      date: normalizedDate,
+      purchaseDate: normalizedDate,
       type: normalizedType,
     },
   };
@@ -119,7 +120,7 @@ function normalizeAmount(amount: number): number {
 
 function mapType(rawType: string): ExtractedTransactionType {
   const normalized = rawType.trim().toLowerCase();
-  const mapped = typeMap[normalized];
+  const mapped = AUVP_KEYWORDS[normalized];
   if (!mapped) {
     throw new Error("Unsupported transaction type");
   }

@@ -74,18 +74,14 @@ function ExtractionPreviewTable({ result, summary, onDiscard, onProceed }: Extra
               <TableBody>
                 {validRows.map((transaction, index) => (
                   <TableRow key={`${transaction.description}-${index}`}>
-                    <TableCell>{transaction.date}</TableCell>
+                    <TableCell>{transaction.purchaseDate}</TableCell>
                     <TableCell className="font-medium text-slate-800">{transaction.description}</TableCell>
                     <TableCell className="text-right">
-                      {currency.format(transaction.amount * (transaction.type === "OUT" ? -1 : 1))}
+                      {currency.format(transaction.amount)}
                     </TableCell>
                     <TableCell className="text-center">
-                      <span
-                        className={
-                          transaction.type === "OUT" ? "text-rose-600 font-semibold" : "text-emerald-600 font-semibold"
-                        }
-                      >
-                        {transaction.type === "OUT" ? "Despesa" : "Receita"}
+                      <span>
+                        {transaction.type}
                       </span>
                     </TableCell>
                   </TableRow>

@@ -23,9 +23,11 @@ model Transaction {
   type                String // IN | OUT
   envelopeId          Int?
   transactionImportId Int?
+  cardPurchaseId      Int?
   createdAt           DateTime           @default(now())
   Envelope            Envelope?          @relation(fields: [envelopeId], references: [id])
   TransactionImport   TransactionImport? @relation(fields: [transactionImportId], references: [id])
+  CardPurchase        CardPurchase?      @relation(fields: [cardPurchaseId], references: [id])
 }
 
 model TransactionImport {
@@ -35,4 +37,60 @@ model TransactionImport {
   fileSize    Int
   createdAt   DateTime      @default(now())
   Transaction Transaction[]
+}
+
+model CardStatementImport {
+  id             Int               @id @default(autoincrement())
+  fileHash       String            @unique
+  fileName       String
+  fileSize       Int
+  statementMonth DateTime?
+  cardIdentifier String?
+  status         String            @default("PENDING")
+  createdAt      DateTime          @default(now())
+  processedAt    DateTime?
+  purchases      CardPurchase[]
+  installments   CardInstallment[]
+}
+
+model CardPurchase {
+  id                    Int                  @id @default(autoincrement())
+  description           String
+  purchaseDate          DateTime
+  totalAmount           Decimal
+  auvpCategory          String?
+  paymentMethod         String               @default("CARD")
+  cardIdentifier        String?
+  cardPurchaseKey       String               @unique
+  statementImportId     Int?
+  normalizedDescription String?
+  metadata              Json?
+  rawPayload            Json?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  installments          CardInstallment[]
+  transactions          Transaction[]
+  statementImport       CardStatementImport? @relation(fields: [statementImportId], references: [id])
+}
+
+model CardInstallment {
+  id                 Int                 @id @default(autoincrement())
+  cardPurchaseId     Int
+  statementImportId  Int
+  installmentNumber  Int
+  installmentCount   Int?
+  installmentAmount  Decimal
+  totalAmount        Decimal?
+  statementMonth     DateTime?
+  dueDate            DateTime?
+  status             String              @default("PENDING")
+  normalizedLineHash String
+  rawLine            String?
+  rawPayload         Json?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  cardPurchase       CardPurchase        @relation(fields: [cardPurchaseId], references: [id])
+  statementImport    CardStatementImport @relation(fields: [statementImportId], references: [id])
+
+  @@unique([statementImportId, normalizedLineHash])
 }
