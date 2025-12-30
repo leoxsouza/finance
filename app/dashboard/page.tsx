@@ -9,6 +9,8 @@ import { requireSession } from "@/lib/auth/serverSession";
 import finance from "@/lib/finance";
 import type { DashboardEnvelope } from "@/lib/finance";
 
+import { EnvelopeCardAction } from "./components/EnvelopeCardAction";
+
 export const dynamic = "force-dynamic";
 
 import DashboardChart from "./DashboardChart";
@@ -101,7 +103,7 @@ async function DashboardPage({ searchParams }: DashboardPageProps) {
         </CardContent>
       </Card>
 
-      <EnvelopeGrid envelopes={dashboard.envelopes} />
+      <EnvelopeGrid envelopes={dashboard.envelopes} month={month} />
     </section>
   );
 }
@@ -110,7 +112,7 @@ function formatPercentage(value: number) {
   return value.toLocaleString("pt-BR", { style: "percent", maximumFractionDigits: 0 });
 }
 
-function EnvelopeGrid({ envelopes }: { envelopes: DashboardEnvelope[] }) {
+function EnvelopeGrid({ envelopes, month }: { envelopes: DashboardEnvelope[]; month: string }) {
   if (envelopes.length === 0) {
     return (
       <Card>
@@ -124,21 +126,28 @@ function EnvelopeGrid({ envelopes }: { envelopes: DashboardEnvelope[] }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       {envelopes.map((envelope) => (
-        <EnvelopeCard key={envelope.id} envelope={envelope} />
+        <EnvelopeCard key={envelope.id} envelope={envelope} month={month} />
       ))}
     </div>
   );
 }
 
-function EnvelopeCard({ envelope }: { envelope: DashboardEnvelope }) {
+function EnvelopeCard({ envelope, month }: { envelope: DashboardEnvelope; month: string }) {
   const percent = Math.min(envelope.percentageUsed * 100, 999);
   const statusClass =
     percent >= 100 ? "text-sm font-semibold text-rose-600" : "text-sm font-semibold text-emerald-600";
 
   return (
     <Card>
-      <CardHeader className="flex flex-col gap-1 border-b border-slate-100">
-        <CardTitle className="flex items-center justify-between text-lg">
+      <CardHeader className="flex flex-col gap-1 border-b border-slate-100 relative">
+        <div className="absolute top-4 right-4">
+          <EnvelopeCardAction
+            envelopeId={envelope.id}
+            envelopeName={envelope.name}
+            month={month}
+          />
+        </div>
+        <CardTitle className="flex items-center justify-between text-lg pr-12">
           {envelope.name}
           <span className={statusClass}>{percent.toFixed(0)}%</span>
         </CardTitle>

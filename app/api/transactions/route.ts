@@ -1,9 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { z } from "zod";
-
 import { ensureApiAuthenticated } from "@/lib/auth/api";
+import { z } from "zod";
 import prisma from "@/lib/db";
 import finance from "@/lib/finance";
+import { createSingleTransaction, createRecurringTransaction } from "./recurring-functions";
+import {
+  DEFAULT_TRANSACTIONS_PAGE,
+  DEFAULT_TRANSACTIONS_PAGE_SIZE,
+  TRANSACTION_PAGE_SIZE_OPTIONS,
+  type TransactionPageSizeOption,
+} from "@/lib/transactions/constants";
 
 const dateStringSchema = z
   .string()
@@ -21,6 +27,42 @@ const transactionDeleteQuerySchema = z.object({
     }),
 });
 
+const transactionUpdateQuerySchema = z.object({
+  id: z
+    .string()
+    .transform((value) => Number(value))
+    .refine((value) => Number.isInteger(value) && value > 0, {
+      message: "id must be a positive integer",
+    }),
+});
+
+const transactionUpdateSchema = z
+  .object({
+    date: dateStringSchema.optional(),
+    description: z.string().min(1, "Description is required").optional(),
+    value: z.number().positive("Value must be positive").optional(),
+    type: z.enum(["IN", "OUT"]).optional(),
+    envelopeId: z.number().int().positive().nullable().optional(),
+  })
+  .superRefine((payload, ctx) => {
+    // If updating type to OUT, envelopeId is required
+    if (payload.type === "OUT" && (payload.envelopeId === undefined || payload.envelopeId === null)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["envelopeId"],
+        message: "Envelope is required for expenses",
+      });
+    }
+  })
+  .refine((payload) => {
+    // At least one field must be provided for update
+    const fields = Object.keys(payload);
+    return fields.length > 0;
+  }, {
+    message: "At least one field must be provided for update",
+  });
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const transactionInputSchema = z
   .object({
     date: dateStringSchema,
@@ -75,6 +117,21 @@ const transactionsQuerySchema = z.object({
       message: "envelopeId must be a positive integer",
     })
     .optional(),
+  installment: z.enum(["INSTALLMENT", "NON_INSTALLMENT"]).optional(),
+  page: z
+    .union([z.string(), z.number()])
+    .transform((value) => Number(value))
+    .refine((value) => Number.isInteger(value) && value > 0, { message: "page must be a positive integer" })
+    .optional(),
+  pageSize: z
+    .union([z.string(), z.number()])
+    .transform((value) => Number(value))
+    .refine((value) => TRANSACTION_PAGE_SIZE_OPTIONS.includes(value as TransactionPageSizeOption), {
+      message: `pageSize must be one of ${TRANSACTION_PAGE_SIZE_OPTIONS.join(", ")}`,
+    })
+    .optional(),
+  sortBy: z.enum(["date", "description", "value", "type", "envelopeName"]).optional(),
+  sortOrder: z.enum(["asc", "desc"]).optional(),
 });
 
 export async function GET(request: NextRequest) {
@@ -85,6 +142,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const query = transactionsQuerySchema.parse(Object.fromEntries(request.nextUrl.searchParams));
+    const page = query.page ?? DEFAULT_TRANSACTIONS_PAGE;
+    const pageSize = query.pageSize ?? DEFAULT_TRANSACTIONS_PAGE_SIZE;
 
     const month = query.month ?? finance.getCurrentMonth();
     const { start, end } = finance.getMonthRange(month);
@@ -92,33 +151,117 @@ export async function GET(request: NextRequest) {
     const where = {
       ...(query.type ? { type: query.type } : {}),
       ...(query.envelopeId ? { envelopeId: query.envelopeId } : {}),
+      ...(query.installment ? {
+        [query.installment === "INSTALLMENT" ? "cardPurchaseId" : "cardPurchaseId"]: 
+          query.installment === "INSTALLMENT" ? { not: null } : null
+      } : {}),
       date: {
         gte: start,
         lt: end,
       },
     };
 
-    const transactions = await prisma.transaction.findMany({
-      where,
-      include: { Envelope: true },
-      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    // Field mapping for sorting
+    const sortFieldMapping = {
+      date: "date",
+      description: "description",
+      value: "value",
+      type: "type",
+      envelopeName: "Envelope.name",
+    } as const;
+
+    // Build dynamic orderBy clause
+    let orderBy: Array<{ [key: string]: "asc" | "desc" }> = [];
+    if (query.sortBy && query.sortOrder) {
+      const field = sortFieldMapping[query.sortBy];
+      if (field) {
+        orderBy.push({ [field]: query.sortOrder });
+      }
+    }
+    
+    // Default ordering if no sort parameters provided
+    if (orderBy.length === 0) {
+      orderBy = [{ date: "desc" }, { createdAt: "desc" }];
+    }
+
+    const [transactions, total] = await Promise.all([
+      prisma.transaction.findMany({
+        where,
+        include: { 
+          Envelope: true,
+          CardPurchase: {
+            select: {
+              metadata: true,
+              installments: {
+                select: { installmentNumber: true, installmentCount: true },
+                orderBy: { installmentNumber: "asc" },
+                take: 1
+              }
+            }
+          }
+        },
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.transaction.count({ where }),
+    ]);
+
+    const serialized = transactions.map((transaction: (typeof transactions)[number]) => {
+      // Extract installment metadata from CardPurchase if available
+      const metadata = transaction.CardPurchase?.metadata as Record<string, unknown> | null;
+      const installmentNumber = (metadata?.installmentNumber as number) ?? 
+        transaction.CardPurchase?.installments?.[0]?.installmentNumber ?? null;
+      const installmentCount = (metadata?.installmentCount as number) ?? 
+        transaction.CardPurchase?.installments?.[0]?.installmentCount ?? null;
+
+      return {
+        id: transaction.id,
+        date: transaction.date.toISOString(),
+        description: transaction.description,
+        value: transaction.value,
+        type: transaction.type as "IN" | "OUT",
+        envelopeId: transaction.envelopeId,
+        envelopeName: transaction.Envelope?.name ?? null,
+        installmentNumber,
+        installmentCount,
+      };
     });
 
-    const serialized = transactions.map((transaction: (typeof transactions)[number]) => ({
-      id: transaction.id,
-      date: transaction.date.toISOString(),
-      description: transaction.description,
-      value: transaction.value,
-      type: transaction.type as "IN" | "OUT",
-      envelopeId: transaction.envelopeId,
-      envelopeName: transaction.Envelope?.name ?? null,
-    }));
-
-    return NextResponse.json(serialized);
+    return NextResponse.json({
+      items: serialized,
+      total,
+      page,
+      pageSize,
+    });
   } catch (error) {
     return handleError(error);
   }
 }
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const recurringTransactionInputSchema = z.object({
+  isRecurring: z.boolean().default(false),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+});
+
+export const transactionWithRecurringSchema = z.object({
+  date: dateStringSchema,
+  description: z.string().min(1, "Description is required"),
+  value: z.number().positive("Value must be positive"),
+  type: z.enum(["IN", "OUT"]),
+  envelopeId: z.number().int().positive().optional(),
+  isRecurring: z.boolean().default(false),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+}).superRefine((payload, ctx) => {
+  if (payload.type === "OUT" && !payload.envelopeId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["envelopeId"],
+      message: "Envelope is required for expenses",
+    });
+  }
+});
 
 export async function POST(request: NextRequest) {
   const authError = await ensureApiAuthenticated();
@@ -127,40 +270,84 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const payload = transactionInputSchema.parse(await request.json());
+    const payload = transactionWithRecurringSchema.parse(await request.json());
 
-    const envelopeId = payload.type === "OUT" ? payload.envelopeId! : undefined;
-    if (envelopeId) {
-      const envelope = await prisma.envelope.findUnique({ where: { id: envelopeId } });
+    if (payload.isRecurring) {
+      return await createRecurringTransaction(payload);
+    } else {
+      return await createSingleTransaction(payload);
+    }
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  const authError = await ensureApiAuthenticated();
+  if (authError) {
+    return authError;
+  }
+
+  try {
+    const query = transactionUpdateQuerySchema.parse(Object.fromEntries(request.nextUrl.searchParams));
+    const payload = transactionUpdateSchema.parse(await request.json());
+
+    // Validate envelope exists if provided
+    if (payload.envelopeId) {
+      const envelope = await prisma.envelope.findUnique({ where: { id: payload.envelopeId } });
       if (!envelope) {
         return NextResponse.json({ error: "Envelope not found" }, { status: 404 });
       }
     }
 
-    const created = await prisma.transaction.create({
+    const updated = await prisma.transaction.update({
+      where: { id: query.id },
       data: {
-        date: new Date(payload.date),
-        description: payload.description,
-        value: payload.value,
-        type: payload.type,
-        ...(envelopeId ? { envelopeId } : {}),
+        ...(payload.date && { date: new Date(payload.date) }),
+        ...(payload.description !== undefined && { description: payload.description }),
+        ...(payload.value !== undefined && { value: payload.value }),
+        ...(payload.type !== undefined && { type: payload.type }),
+        ...(payload.envelopeId !== undefined && { 
+          envelopeId: payload.envelopeId 
+        }),
       },
-      include: { Envelope: true },
+      include: { 
+        Envelope: true,
+        CardPurchase: {
+          select: {
+            metadata: true,
+            installments: {
+              select: { installmentNumber: true, installmentCount: true },
+              orderBy: { installmentNumber: "asc" },
+              take: 1
+            }
+          }
+        }
+      },
     });
 
-    return NextResponse.json(
-      {
-        id: created.id,
-        date: created.date.toISOString(),
-        description: created.description,
-        value: created.value,
-        type: created.type as "IN" | "OUT",
-        envelopeId: created.envelopeId ?? null,
-        envelopeName: created.Envelope?.name ?? null,
-      },
-      { status: 201 },
-    );
+    // Extract installment metadata for response
+    const metadata = updated.CardPurchase?.metadata as Record<string, unknown> | null;
+    const installmentNumber = (metadata?.installmentNumber as number) ?? 
+      updated.CardPurchase?.installments?.[0]?.installmentNumber ?? null;
+    const installmentCount = (metadata?.installmentCount as number) ?? 
+      updated.CardPurchase?.installments?.[0]?.installmentCount ?? null;
+
+    return NextResponse.json({
+      id: updated.id,
+      date: updated.date.toISOString(),
+      description: updated.description,
+      value: updated.value,
+      type: updated.type as "IN" | "OUT",
+      envelopeId: updated.envelopeId ?? null,
+      envelopeName: updated.Envelope?.name ?? null,
+      installmentNumber,
+      installmentCount,
+    });
   } catch (error) {
+    if (error instanceof Error && error.message.includes("Record to update does not exist")) {
+      return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
+    }
     return handleError(error);
   }
 }

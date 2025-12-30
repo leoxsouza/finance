@@ -1,0 +1,34 @@
+{
+  "transactions": [
+    {
+      "description": "AMZN TESTE 01/05",
+      "amount": -25,
+      "type": "Prazeres",
+      "purchaseDate": "05/12",
+      "statementMonth": "2024-12",
+      "installmentNumber": 1,
+      "installmentCount": 5,
+      "installmentAmount": 25,
+      "cardLastDigits": "1234",
+      "rawLine": "05/12 AMZN TESTE 01/05 25,00",
+      "isReversal": true
+    },
+    {
+      "description": "ESTORNO SHOP",
+      "amount": 40,
+      "type": "Conforto",
+      "purchaseDate": "07/12",
+      "statementMonth": "2024-12",
+      "cardLastDigits": "9999",
+      "rawLine": "07/12 ESTORNO SHOP -40,00",
+      "isReversal": true
+    },
+    {
+      "description": "   ",
+      "amount": -30,
+      "type": "desconhecido",
+      "purchaseDate": "32/13",
+      "statementMonth": "2024-12"
+    }
+  ]
+}
