@@ -43,24 +43,18 @@ export function validateExtractionResponse(input: unknown): ExtractionValidation
   const invalid: ValidationIssue[] = [];
 
   parsed.data.transactions.forEach((transaction, index) => {
-    valid.push({
-      description: transaction.description.trim(),
-      amount: transaction.amount,
-      purchaseDate: transaction.purchaseDate,
-      type: transaction.type as ExtractedTransactionType,
-    });
-    // const result = validateSingleTransaction(transaction, index);
-    // if ("transaction" in result) {
-    //   valid.push(result.transaction);
-    // } else {
-    //   invalid.push(...result.issues);
-    // }
+    const result = validateSingleTransaction(transaction, index);
+    if ("transaction" in result) {
+      valid.push(result.transaction);
+    } else {
+      invalid.push(...result.issues);
+    }
   });
 
   return { valid, invalid };
 }
 
-function validateSingleTransaction(
+export function validateSingleTransaction(
   raw: GeminiTransaction,
   index: number,
 ): { transaction: ExtractedTransactionCandidate } | { issues: ValidationIssue[] } {

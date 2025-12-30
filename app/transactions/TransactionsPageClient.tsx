@@ -2,8 +2,10 @@
 
 import { useCallback, useMemo, useState, useTransition } from "react";
 import type { ChangeEvent, FormEvent } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import { PaginationControls } from "@/components/ui/pagination";
 import { Button } from "@/components/ui/button";
 import Input from "@/components/ui/input";
 import Select from "@/components/ui/select";
@@ -24,14 +26,40 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  SortableTableHead,
 } from "@/components/ui/table";
+import { usePagination } from "@/hooks/usePagination";
+import {
+  DEFAULT_TRANSACTIONS_PAGE,
+  DEFAULT_TRANSACTIONS_PAGE_SIZE,
+  TRANSACTION_PAGE_SIZE_OPTIONS,
+} from "@/lib/transactions/constants";
 import CsvImportButton from "./components/CsvImportButton";
-import type { EnvelopeOption, TransactionRow } from "./types";
+import { TransactionRow as TransactionRowComponent } from "./components/TransactionRow";
+import RecurringTransactionsManager from "./RecurringTransactionsManager";
+import type { 
+  EnvelopeOption, 
+  TransactionRow, 
+  TransactionsFilters, 
+  TransactionsListResponse, 
+  SortState, 
+  SortField, 
+  SortOrder 
+} from "@/types/transactions";
+
+type PaginationState = {
+  page: number;
+  pageSize: number;
+  total: number;
+};
 
 type TransactionsPageClientProps = {
   defaultMonth: string;
   envelopes: EnvelopeOption[];
   initialTransactions: TransactionRow[];
+  initialFilters: TransactionsFilters;
+  initialPagination: PaginationState;
+  initialSortState?: SortState;
 };
 
 type TransactionFormState = {
@@ -40,13 +68,11 @@ type TransactionFormState = {
   value: string;
   type: "IN" | "OUT";
   envelopeId: string;
+  isRecurring: boolean;
+  endDate: string;
 };
 
-type FiltersState = {
-  month: string;
-  type: "" | "IN" | "OUT";
-  envelopeId: string;
-};
+type FiltersState = TransactionsFilters;
 
 const transactionTypeOptions = [
   { label: "Income", value: "IN" },
@@ -55,16 +81,20 @@ const transactionTypeOptions = [
 
 const typeFilterOptions = [{ label: "All types", value: "" }, ...transactionTypeOptions];
 
+const installmentFilterOptions = [
+  { label: "All transactions", value: "" },
+  { label: "Installments only", value: "INSTALLMENT" },
+  { label: "Non-installments only", value: "NON_INSTALLMENT" },
+];
+
+const DEFAULT_SORT_STATE: SortState = {
+  sortBy: "date",
+  sortOrder: "desc",
+};
+
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
-});
-
-const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
 });
 
 const createInitialFormState = (defaultMonth: string, envelopes: EnvelopeOption[]): TransactionFormState => {
@@ -78,12 +108,23 @@ const createInitialFormState = (defaultMonth: string, envelopes: EnvelopeOption[
     value: "",
     type: "OUT",
     envelopeId: envelopes[0]?.id.toString() ?? "",
+    isRecurring: false,
+    endDate: "",
   };
 };
 
-function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }: TransactionsPageClientProps) {
+function TransactionsPageClient({
+  defaultMonth,
+  envelopes,
+  initialTransactions,
+  initialFilters,
+  initialPagination,
+  initialSortState,
+}: TransactionsPageClientProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [form, setForm] = useState<TransactionFormState>(() => createInitialFormState(defaultMonth, envelopes));
-  const [filters, setFilters] = useState<FiltersState>({ month: defaultMonth, type: "", envelopeId: "" });
+  const [filters, setFilters] = useState<FiltersState>(initialFilters);
   const [transactions, setTransactions] = useState<TransactionRow[]>(initialTransactions);
   const [formError, setFormError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -91,8 +132,11 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [transactionPendingDelete, setTransactionPendingDelete] = useState<TransactionRow | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [paginationState, setPaginationState] = useState<PaginationState>(initialPagination);
+  const [sortState, setSortState] = useState<SortState>(initialSortState || DEFAULT_SORT_STATE);
   const [isSubmitting, startSubmitTransition] = useTransition();
   const [isRefreshing, startRefreshTransition] = useTransition();
+  const pageSizeOptions = useMemo(() => Array.from(TRANSACTION_PAGE_SIZE_OPTIONS), []);
 
   const envelopeFilterOptions = useMemo(
     () => [{ label: "All envelopes", value: "" }, ...envelopes.map((env) => ({ label: env.name, value: env.id.toString() }))],
@@ -103,12 +147,6 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
     () => envelopes.map((env) => ({ label: env.name, value: env.id.toString() })),
     [envelopes],
   );
-
-  const envelopeLookup = useMemo(() => {
-    const map = new Map<number, string>();
-    envelopes.forEach((env) => map.set(env.id, env.name));
-    return map;
-  }, [envelopes]);
 
   const totals = useMemo(() => {
     return transactions.reduce(
@@ -126,27 +164,59 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
 
   const balance = totals.income - totals.expense;
 
+  const buildSearchParams = useCallback(
+    (targetFilters: FiltersState, pageValue: number, pageSizeValue: number, currentSortState: SortState) => {
+      const params = new URLSearchParams();
+      params.set("month", targetFilters.month);
+      if (targetFilters.type) params.set("type", targetFilters.type);
+      if (targetFilters.envelopeId) params.set("envelopeId", targetFilters.envelopeId);
+      if (targetFilters.installment) params.set("installment", targetFilters.installment);
+      params.set("page", pageValue.toString());
+      params.set("pageSize", pageSizeValue.toString());
+      params.set("sortBy", currentSortState.sortBy);
+      params.set("sortOrder", currentSortState.sortOrder);
+      return params;
+    },
+    [],
+  );
+
+  const fetchTransactions = useCallback(
+    async (nextFilters: FiltersState, pageValue: number, pageSizeValue: number, currentSortState?: SortState) => {
+      const params = buildSearchParams(nextFilters, pageValue, pageSizeValue, currentSortState || sortState);
+      const response = await fetch(`/api/transactions?${params.toString()}`, {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error ?? "Unable to fetch transactions");
+      }
+
+      const data = (await response.json()) as TransactionsListResponse;
+      setTransactions(data.items);
+      setPaginationState({
+        page: data.page,
+        pageSize: data.pageSize,
+        total: data.total,
+      });
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      return data;
+    },
+    [buildSearchParams, pathname, router, sortState],
+  );
+
   const refreshTransactions = useCallback(
-    (nextFilters: FiltersState) => {
+    (nextFilters: FiltersState, paginationOverride?: Partial<PaginationState>) => {
+      const targetPage = paginationOverride?.page ?? paginationState.page ?? DEFAULT_TRANSACTIONS_PAGE;
+      const targetPageSize = paginationOverride?.pageSize ?? paginationState.pageSize ?? DEFAULT_TRANSACTIONS_PAGE_SIZE;
+
       startRefreshTransition(async () => {
         try {
           setListError(null);
-          const params = new URLSearchParams();
-          if (nextFilters.month) params.set("month", nextFilters.month);
-          if (nextFilters.type) params.set("type", nextFilters.type);
-          if (nextFilters.envelopeId) params.set("envelopeId", nextFilters.envelopeId);
-
-          const response = await fetch(`/api/transactions?${params.toString()}`, {
-            cache: "no-store",
-          });
-
-          if (!response.ok) {
-            const payload = await response.json().catch(() => ({}));
-            throw new Error(payload.error ?? "Unable to fetch transactions");
+          let data = await fetchTransactions(nextFilters, targetPage, targetPageSize);
+          if (data.items.length === 0 && data.total > 0 && data.page > 1) {
+            data = await fetchTransactions(nextFilters, data.page - 1, data.pageSize);
           }
-
-          const data = (await response.json()) as TransactionRow[];
-          setTransactions(data);
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unexpected error while fetching transactions";
           setListError(message);
@@ -154,14 +224,42 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
         }
       });
     },
-    [startRefreshTransition],
+    [fetchTransactions, paginationState.page, paginationState.pageSize, startRefreshTransition],
   );
+
+  const pagination = usePagination({
+    totalItems: paginationState.total,
+    initialPage: initialPagination.page,
+    initialPageSize: initialPagination.pageSize,
+    pageSizeOptions,
+    onChange: (next) => {
+      refreshTransactions(filters, next);
+    },
+    isPending: isRefreshing,
+  });
 
   const handleFilterChange = (partial: Partial<FiltersState>) => {
     const nextFilters = { ...filters, ...partial };
     setFilters(nextFilters);
-    refreshTransactions(nextFilters);
+    refreshTransactions(nextFilters, { page: DEFAULT_TRANSACTIONS_PAGE });
   };
+
+  const handleSortChange = useCallback(
+    (field: string) => {
+      // Validate that the field is a valid SortField
+      const validFields: SortField[] = ["date", "description", "value", "type", "envelopeName"];
+      if (!validFields.includes(field as SortField)) {
+        return; // Invalid field, do nothing
+      }
+
+      const sortField = field as SortField;
+      const newSortOrder = sortState.sortBy === sortField && sortState.sortOrder === 'asc' ? 'desc' : 'asc';
+      const newSortState = { sortBy: sortField, sortOrder: newSortOrder as SortOrder };
+      setSortState(newSortState);
+      refreshTransactions(filters, { page: DEFAULT_TRANSACTIONS_PAGE });
+    },
+    [sortState, filters, refreshTransactions]
+  );
 
   const shiftMonth = (month: string, deltaMonths: number) => {
     const [yearPart, monthPart] = month.split("-");
@@ -198,6 +296,8 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    
+    // Existing validations
     if (form.type === "OUT" && !form.envelopeId) {
       setFormError("Envelope is required for expenses");
       return;
@@ -206,6 +306,12 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
     const numericValue = Number(form.value);
     if (!Number.isFinite(numericValue) || numericValue <= 0) {
       setFormError("Value must be greater than zero");
+      return;
+    }
+
+    // Recurring transaction validation
+    if (form.isRecurring && form.endDate && form.endDate <= form.date) {
+      setFormError("End date must be after the start date");
       return;
     }
 
@@ -224,6 +330,8 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
             value: numericValue,
             type: form.type,
             envelopeId: form.type === "OUT" ? Number(form.envelopeId) : undefined,
+            isRecurring: form.isRecurring,
+            endDate: form.isRecurring && form.endDate ? form.endDate : null,
           }),
         });
 
@@ -232,9 +340,23 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
           throw new Error(payload.error ?? "Unable to create transaction");
         }
 
+        const result = await response.json();
+        
         resetForm();
         refreshTransactions(filters);
-        toast.success("Transaction created", { description: "Your transaction was saved successfully." });
+        
+        if (result.isRecurring) {
+          const message = result.generatedCount > 0 
+            ? `Recurring transaction created with ${result.generatedCount} future transactions`
+            : "Recurring transaction created";
+          toast.success("Recurring transaction created", { 
+            description: message
+          });
+        } else {
+          toast.success("Transaction created", { 
+            description: "Your transaction was saved successfully." 
+          });
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unexpected error while saving transaction";
         setFormError(message);
@@ -257,6 +379,44 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
     setTransactionPendingDelete(null);
   };
 
+  const handleUpdate = useCallback(
+    async (id: number, updates: Partial<TransactionRow>) => {
+      // Optimistic update - update local state immediately
+      setTransactions((prev) =>
+        prev.map((trx) =>
+          trx.id === id ? { ...trx, ...updates } : trx
+        )
+      );
+
+      try {
+        const response = await fetch(`/api/transactions?id=${id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(updates),
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.error ?? "Unable to update transaction");
+        }
+
+        // Refresh transactions to get the latest data from server
+        refreshTransactions(filters);
+      } catch (error) {
+        // Revert optimistic update on error
+        setTransactions((prev) =>
+          prev.map((trx) =>
+            trx.id === id ? { ...trx } : trx // This will trigger a re-render with original data
+          )
+        );
+        throw error;
+      }
+    },
+    [filters, refreshTransactions]
+  );
+
   const handleDelete = (transaction: TransactionRow) => {
     setDeleteError(null);
     setDeletingId(transaction.id);
@@ -272,7 +432,11 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
           throw new Error(payload.error ?? "Unable to delete transaction");
         }
 
-        refreshTransactions(filters);
+        const currentPageItems = transactions.length;
+        const isLastItemOnPage = currentPageItems === 1 && paginationState.page > 1;
+        const nextPage = isLastItemOnPage ? paginationState.page - 1 : paginationState.page;
+
+        refreshTransactions(filters, { page: nextPage });
         toast.success("Transaction deleted", { description: `Transaction #${transaction.id} was deleted.` });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unexpected error while deleting transaction";
@@ -382,6 +546,43 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
             </div>
           </div>
 
+          {/* Recurring Transaction Options */}
+          <div className="space-y-3 border-t border-slate-200 pt-4">
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="isRecurring"
+                checked={form.isRecurring}
+                onChange={(e) => handleFormChange({ isRecurring: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              />
+              <label htmlFor="isRecurring" className="text-sm font-medium text-slate-700">
+                Make this a recurring transaction
+              </label>
+            </div>
+
+            {form.isRecurring && (
+              <div className="space-y-2 pl-6">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-slate-700">
+                    End Date (optional)
+                  </label>
+                  <Input
+                    type="date"
+                    value={form.endDate}
+                    onChange={onFormInputChange("endDate")}
+                    min={form.date}
+                    placeholder="No end date"
+                  />
+                  <p className="text-xs text-slate-500">
+                    Transaction will repeat monthly on the {new Date(form.date).getDate()}th day. 
+                    Leave end date empty for indefinite recurrence.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
           {formError && <p className="text-sm text-rose-600">{formError}</p>}
 
           <div className="flex flex-wrap items-center gap-3">
@@ -454,6 +655,14 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
                 onChange={(event) => handleFilterChange({ envelopeId: event.target.value })}
               />
             </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700">Installments</label>
+              <Select
+                options={installmentFilterOptions}
+                value={filters.installment}
+                onChange={(event) => handleFilterChange({ installment: event.target.value as FiltersState["installment"] })}
+              />
+            </div>
           </div>
         </form>
       </section>
@@ -477,60 +686,89 @@ function TransactionsPageClient({ defaultMonth, envelopes, initialTransactions }
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Date</TableHead>
-            <TableHead>Description</TableHead>
-            <TableHead className="text-right">Value</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Envelope</TableHead>
+            <SortableTableHead 
+              field="date" 
+              currentSort={sortState} 
+              onSortChange={handleSortChange}
+            >
+              Date
+            </SortableTableHead>
+            <SortableTableHead 
+              field="description" 
+              currentSort={sortState} 
+              onSortChange={handleSortChange}
+            >
+              Description
+            </SortableTableHead>
+            <SortableTableHead 
+              field="value" 
+              currentSort={sortState} 
+              onSortChange={handleSortChange}
+              className="text-right"
+            >
+              Value
+            </SortableTableHead>
+            <SortableTableHead 
+              field="type" 
+              currentSort={sortState} 
+              onSortChange={handleSortChange}
+            >
+              Type
+            </SortableTableHead>
+            <SortableTableHead 
+              field="envelopeName" 
+              currentSort={sortState} 
+              onSortChange={handleSortChange}
+            >
+              Envelope
+            </SortableTableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {transactions.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={5} className="py-6 text-center text-sm text-slate-500">
+              <TableCell colSpan={6} className="py-6 text-center text-sm text-slate-500">
                 No transactions found for the selected filters.
               </TableCell>
             </TableRow>
           ) : (
             transactions.map((transaction) => (
-              <TableRow key={transaction.id}>
-                <TableCell>{dateFormatter.format(new Date(transaction.date))}</TableCell>
-                <TableCell>
-                  <div>
-                    <p className="font-medium text-slate-900">{transaction.description}</p>
-                    <p className="text-xs text-slate-500">#{transaction.id}</p>
-                  </div>
-                </TableCell>
-                <TableCell className="text-right font-semibold text-slate-900">
-                  {currencyFormatter.format(transaction.value)}
-                </TableCell>
-                <TableCell>
-                  <span className={transaction.type === "IN" ? "text-emerald-600" : "text-rose-600"}>
-                    {transaction.type === "IN" ? "Income" : "Expense"}
-                  </span>
-                </TableCell>
-                <TableCell>
-                  {transaction.envelopeId
-                    ? envelopeLookup.get(transaction.envelopeId) ?? transaction.envelopeName ?? "—"
-                    : transaction.envelopeName ?? "—"}
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => openDeleteDialog(transaction)}
-                    disabled={deletingId === transaction.id}
-                  >
-                    {deletingId === transaction.id ? "Deleting..." : "Delete"}
-                  </Button>
-                </TableCell>
-              </TableRow>
+              <TransactionRowComponent
+                key={transaction.id}
+                transaction={transaction}
+                envelopes={envelopes}
+                onDelete={openDeleteDialog}
+                onUpdate={handleUpdate}
+                deletingId={deletingId}
+              />
             ))
           )}
         </TableBody>
       </Table>
+
+      {paginationState.total > 0 && (
+        <div className="mt-4">
+          <PaginationControls
+            page={pagination.page}
+            pageCount={pagination.pageCount}
+            pageSize={pagination.pageSize}
+            pageSizeOptions={pageSizeOptions}
+            totalItems={pagination.total}
+            start={pagination.startIndex}
+            end={pagination.endIndex}
+            onPageChange={pagination.goToPage}
+            onPageSizeChange={pagination.setPageSize}
+            disabled={isRefreshing}
+            pendingPage={pagination.pendingPage}
+          />
+        </div>
+      )}
+
+      {/* Add Recurring Transactions Manager */}
+      <section className="mt-8">
+        <RecurringTransactionsManager onTransactionUpdated={() => refreshTransactions(filters)} />
+      </section>
     </div>
   );
 }

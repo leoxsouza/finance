@@ -5,6 +5,8 @@ import { ExtractionError } from "@/lib/ai/errors";
 import { getGeminiApiKey, getGeminiExtractionConfig } from "@/lib/ai/config";
 import { geminiExtractionResponseSchema } from "@/lib/ai/schemas";
 import type { GeminiExtractionResponse } from "@/lib/ai/schemas";
+import { logger } from "@/lib/logger";
+import { requestChunkedGeminiExtraction, shouldUseChunkedExtraction } from "@/lib/ai/chunked-extraction";
 
 const SYSTEM_PROMPT = `
 Você é um especialista em finanças pessoais que segue rigorosamente a metodologia AUVP (A Única Verdade Possível).
@@ -31,9 +33,6 @@ Ignore completamente qualquer informação que NÃO represente movimentação fi
 
 Compras parceladas representam UMA ÚNICA TRANSAÇÃO econômica.
 Parcelas existem apenas como metadados de pagamento e jamais devem ser tratadas como gastos independentes.
-
-Nunca estime valores.
-Se o valor total de uma compra parcelada não estiver explicitamente informado no PDF, deixe o campo "totalAmount" vazio.
 
 Sempre preserve a descrição original da transação, sem abreviações, correções ou interpretações livres.
 
@@ -121,6 +120,21 @@ REGRAS DE DATA
 - Se não houver referência clara, assuma o ano de 2025.
 
 ===========================
+REGRAS DE PARCELAMENTO
+===========================
+
+IMPORTANTE:
+- 'installmentCount' NUNCA é uma estimativa quando aparece no formato XX/YY.
+- O número após a barra (YY) é SEMPRE o total de parcelas e deve ser preenchido obrigatoriamente.
+- Mesmo que o valor total da compra não esteja explícito, 'installmentCount' deve ser informado.
+
+- Datas no início da linha (ex: "03/06") representam 'purchaseDate'.
+- Parcelamentos geralmente aparecem após a descrição da transação.
+- Nunca confunda datas (ex: "07/07") com parcelas. Datas ficam no início da linha e sempre representam 'purchaseDate'. Sequências no formato "XX/YY" representam parcelamento (ex: "02/05" = parcela 2 de 5) e devem preencher 'installmentNumber' (parcela atual) e 'installmentCount' (total).
+- Se identificar mais de um número fracionado na mesma linha, considere o primeiro como 'purchaseDate' e o segundo como 'installmentNumber/installmentCount'.
+- **IMPORTANTE**: Nunca separe uma linha em múltiplas transações. Cada linha do PDF deve gerar exatamente UMA transação, mesmo que contenha múltiplos valores. Use o valor principal (geralmente o último) como 'amount'.
+
+===========================
 FEW-SHOT EXAMPLES
 ===========================
 
@@ -154,36 +168,51 @@ Saída esperada:
   "type": "Conforto",
   "installmentNumber": 3,
   "installmentCount": 6,
-  "installmentAmount": 42.50,
-  "totalAmount": null,
   "rawLine": "18/01 IFOOD *RESTAURANTE 03/06 R$ 42,50",
   "isReversal": false
 }
 
 ---
 
-EXEMPLO 3 — Compra parcelada COM valor total explícito (Conhecimento)
+EXEMPLO 3 — Compra com data "07/07" e parcela "05/06" (Custos fixos)
 
 Linha no PDF:
-"10/01 ALURA CURSOS 01/12 TOTAL R$ 1.200,00 R$ 100,00"
+"07/07 LABORATORIO DR RIBEIRO LT 05/06 R$ 44,00"
 
 Saída esperada:
 {
-  "purchaseDate": "2025-01-10",
-  "description": "ALURA CURSOS",
-  "amount": -100.00,
-  "type": "Conhecimento",
-  "installmentNumber": 1,
-  "installmentCount": 12,
-  "installmentAmount": 100.00,
-  "totalAmount": 1200.00,
-  "rawLine": "10/01 ALURA CURSOS 01/12 TOTAL R$ 1.200,00 R$ 100,00",
+  "purchaseDate": "2025-07-07",
+  "description": "LABORATORIO DR RIBEIRO LT",
+  "amount": -44.00,
+  "type": "Custos fixos",
+  "installmentNumber": 5,
+  "installmentCount": 6,
+  "rawLine": "07/07 LABORATORIO DR RIBEIRO LT 05/06 R$ 44,00",
   "isReversal": false
 }
 
 ---
 
-EXEMPLO 4 — Estorno / crédito
+EXEMPLO 4 — Compra parcelada com múltiplos valores na mesma linha (Metas)
+
+Linha no PDF:
+"11/09 GOL LINHAS*AASUXN16048367 02/05 420,12"
+
+Saída esperada:
+{
+  "purchaseDate": "2025-09-11",
+  "description": "GOL LINHAS*AASUXN16048367",
+  "amount": -420.12,
+  "type": "Metas",
+  "installmentNumber": 2,
+  "installmentCount": 5,
+  "rawLine": "11/09 GOL LINHAS*AASUXN16048367 02/05 420,12",
+  "isReversal": false
+}
+
+---
+
+EXEMPLO 5 — Transação com estorno/ajuste (Custos fixos)
 
 Linha no PDF:
 "22/01 ESTORNO AMAZON MKTPLACE R$ -129,90"
@@ -200,7 +229,7 @@ Saída esperada:
 
 ---
 
-EXEMPLO 5 — Linha que DEVE ser ignorada
+EXEMPLO 6 — Linha que DEVE ser ignorada
 
 Linha no PDF:
 "22/01 PAGAMENTO DE FATURA R$ -12900,90"
@@ -224,8 +253,6 @@ Metadados adicionais (quando aplicável):
 - statementMonth (YYYY-MM)
 - installmentNumber
 - installmentCount
-- installmentAmount
-- totalAmount (somente se explícito no PDF)
 - cardLastDigits
 - rawLine
 - isReversal
@@ -245,10 +272,27 @@ REGRAS FINAIS OBRIGATÓRIAS
 type ExtractionRequest = {
   pdfBase64: string;
   promptOverride?: string;
+  modelOverride?: string;
 };
 
-export async function requestGeminiExtraction({ pdfBase64, promptOverride }: ExtractionRequest): Promise<GeminiExtractionResponse> {
-  const { model, temperature, timeoutMs } = getGeminiExtractionConfig();
+export async function requestGeminiExtraction({
+  pdfBase64,
+  promptOverride,
+  modelOverride,
+}: ExtractionRequest): Promise<GeminiExtractionResponse> {
+  const useChunked = shouldUseChunkedExtraction(pdfBase64);
+
+  if (useChunked) {
+    logger.debug("Using chunked extraction for large PDF");
+    return requestChunkedGeminiExtraction({
+      pdfBase64,
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: promptOverride ?? DEFAULT_USER_PROMPT,
+      modelOverride,
+    });
+  }
+
+  const { model, temperature, timeoutMs } = getGeminiExtractionConfig(modelOverride ? { model: modelOverride } : undefined);
   const apiKey = getGeminiApiKey();
   const provider = createGoogleGenerativeAI({ apiKey });
   const modelInstance = provider(model);
@@ -284,6 +328,39 @@ export async function requestGeminiExtraction({ pdfBase64, promptOverride }: Ext
         },
       ],
     });
+
+    logger.debug("Gemini extraction response received", {
+      totalTransactions: object.transactions.length,
+      transactionsWithInstallments: object.transactions.filter(t => t.installmentNumber || t.installmentCount).length,
+      transactions: object.transactions.map(t => ({
+        description: t.description,
+        rawLine: t.rawLine,
+        amount: t.amount,
+        installmentNumber: t.installmentNumber,
+        installmentCount: t.installmentCount,
+        totalAmount: t.totalAmount,
+        purchaseDate: t.purchaseDate,
+        type: t.type
+      }))
+    });
+
+    // Special logging for GOL transactions
+    const golTransactions = object.transactions.filter(t => t.description?.includes('GOL') || t.rawLine?.includes('GOL'));
+    if (golTransactions.length > 0) {
+      logger.error("GOL TRANSACTIONS FROM AI", {
+        count: golTransactions.length,
+        transactions: golTransactions.map(t => ({
+          description: t.description,
+          rawLine: t.rawLine,
+          amount: t.amount,
+          installmentNumber: t.installmentNumber,
+          installmentCount: t.installmentCount,
+          totalAmount: t.totalAmount,
+          purchaseDate: t.purchaseDate,
+          type: t.type
+        }))
+      });
+    }
 
     return object;
   } catch (error) {

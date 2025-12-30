@@ -69,13 +69,78 @@ const TableCaption = ({ className, ...props }: React.HTMLAttributes<HTMLTableCap
   <caption className={cn("mt-4 text-sm text-slate-500", className)} {...props} />
 );
 
+// Sortable table header components
+interface SortableTableHeadProps extends React.ThHTMLAttributes<HTMLTableCellElement> {
+  field: string;
+  currentSort: { sortBy: string; sortOrder: "asc" | "desc" };
+  onSortChange: (field: string) => void;
+  children: React.ReactNode;
+}
+
+const SortIcon = ({ direction }: { direction: "asc" | "desc" | "none" }) => {
+  if (direction === "none") {
+    return (
+      <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg 
+      className={cn(
+        "h-4 w-4 transition-colors",
+        direction === "asc" ? "text-slate-700" : "text-slate-700"
+      )} 
+      fill="none" 
+      viewBox="0 0 24 24" 
+      stroke="currentColor"
+    >
+      {direction === "asc" ? (
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+      ) : (
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+      )}
+    </svg>
+  );
+};
+
+const SortableTableHead = React.forwardRef<HTMLTableCellElement, SortableTableHeadProps>(
+  ({ field, currentSort, onSortChange, children, className, ...props }, ref) => {
+    const isActive = currentSort.sortBy === field;
+    const sortDirection = isActive ? currentSort.sortOrder : "none";
+
+    return (
+      <th
+        ref={ref}
+        className={cn(
+          "px-4 py-2 text-left font-medium text-slate-500",
+          "cursor-pointer select-none hover:bg-slate-50 hover:text-slate-700",
+          "transition-colors duration-150",
+          className
+        )}
+        onClick={() => onSortChange(field)}
+        aria-sort={isActive ? (currentSort.sortOrder === "asc" ? "ascending" : "descending") : "none"}
+        {...props}
+      >
+        <div className="flex items-center gap-2">
+          {children}
+          <SortIcon direction={sortDirection} />
+        </div>
+      </th>
+    );
+  },
+);
+SortableTableHead.displayName = "SortableTableHead";
+
 export {
   Table,
   TableHeader,
   TableBody,
   TableFooter,
   TableHead,
-  TableRow,
   TableCell,
   TableCaption,
+  TableRow,
+  SortableTableHead,
 };

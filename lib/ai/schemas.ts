@@ -17,7 +17,6 @@ export const geminiTransactionSchema = z.object({
   statementMonth: nullableString().describe("Mês da fatura no formato YYYY-MM"),
   installmentNumber: nullableNumber().describe("Número da parcela atual"),
   installmentCount: nullableNumber().describe("Quantidade total de parcelas"),
-  installmentAmount: nullableNumber().describe("Valor identificado para a parcela"),
   totalAmount: nullableNumber().describe("Valor total da compra; usar quando informado explicitamente"),
   cardLastDigits: nullableString().describe("Últimos dígitos do cartão quando presentes no PDF"),
   rawLine: nullableString().describe("Linha original usada pela IA para referência"),

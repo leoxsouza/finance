@@ -2,7 +2,6 @@ const DEFAULT_EXTRACTION_MODEL = "models/gemini-3-flash-preview";
 const DEFAULT_TEMPERATURE = 0;
 const DEFAULT_TIMEOUT_MS = 450000;
 const DEFAULT_MAX_PDF_BYTES = 10 * 1024 * 1024; // 10 MB
-const DEFAULT_MAX_OUTPUT_TOKENS = 4000;
 
 export type GeminiConfig = {
   model?: string;
@@ -28,7 +27,6 @@ export function getGeminiExtractionConfig(overrides: GeminiConfig = {}) {
     model: overrides.model ?? DEFAULT_EXTRACTION_MODEL,
     temperature: overrides.temperature ?? DEFAULT_TEMPERATURE,
     timeoutMs: overrides.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    // maxOutputTokens: overrides.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
     maxPdfBytes: DEFAULT_MAX_PDF_BYTES,
   } as const;
 }
