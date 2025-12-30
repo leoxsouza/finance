@@ -37,8 +37,6 @@ export function EditableSelectCell({
     error,
     selectRef,
     startEditing,
-    cancelEditing,
-    saveValue,
     handleKeyDown,
     handleBlur,
     handleChange,

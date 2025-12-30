@@ -53,7 +53,7 @@ export function TransactionRow({
 }: TransactionRowProps) {
   const [updatingFields, setUpdatingFields] = useState<Set<string>>(new Set());
 
-  const handleFieldUpdate = async (field: string, value: any) => {
+  const handleFieldUpdate = async (field: string, value: string | number | null) => {
     const updateKey = `${transaction.id}-${field}`;
     
     // Optimistic update - update local state immediately
@@ -65,10 +65,14 @@ export function TransactionRow({
       
       switch (field) {
         case "date":
-          updates.date = value;
+          if (typeof value === "string") {
+            updates.date = value;
+          }
           break;
         case "description":
-          updates.description = value.trim();
+          if (typeof value === "string") {
+            updates.description = value.trim();
+          }
           break;
         case "value":
           const numValue = Number(value);
@@ -85,7 +89,9 @@ export function TransactionRow({
           }
           break;
         case "envelopeId":
-          updates.envelopeId = value;
+          if (value === null || typeof value === "number") {
+            updates.envelopeId = value;
+          }
           break;
         default:
           throw new Error(`Unknown field: ${field}`);
@@ -109,7 +115,7 @@ export function TransactionRow({
     }
   };
 
-  const validateField = (field: string, value: any): string | null => {
+  const validateField = (field: string, value: string | number | null): string | null => {
     switch (field) {
       case "date":
         if (!value) return "Date is required";
@@ -117,8 +123,8 @@ export function TransactionRow({
         if (Number.isNaN(date.getTime())) return "Invalid date";
         return null;
       case "description":
-        if (!value || !value.trim()) return "Description is required";
-        if (value.trim().length > 255) return "Description too long";
+        if (!value || (typeof value === "string" && !value.trim())) return "Description is required";
+        if (typeof value === "string" && value.trim().length > 255) return "Description too long";
         return null;
       case "value":
         const numValue = Number(value);

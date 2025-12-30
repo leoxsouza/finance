@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { describe, it, expect, beforeEach, vi, type Mocked } from "vitest";
 import { GET } from "../route";
 import { ensureApiAuthenticated } from "@/lib/auth/api";
 import prisma from "@/lib/db";
@@ -32,7 +32,16 @@ vi.mock("@/lib/finance", () => ({
   }
 }));
 
-const mockPrisma = vi.mocked(prisma);
+const mockPrisma = prisma as unknown as {
+  envelope: {
+    findUnique: Mocked<typeof prisma.envelope.findUnique>;
+  };
+  transaction: {
+    findMany: Mocked<typeof prisma.transaction.findMany>;
+    count: Mocked<typeof prisma.transaction.count>;
+  };
+};
+
 const mockFinance = vi.mocked(finance);
 const mockEnsureApiAuthenticated = vi.mocked(ensureApiAuthenticated);
 
@@ -43,7 +52,7 @@ describe("/api/envelopes/[envelopeId]/transactions", () => {
 
   it("requires authentication", async () => {
     mockEnsureApiAuthenticated.mockResolvedValueOnce(
-      new Response("Unauthorized", { status: 401 }) as any
+      new Response("Unauthorized", { status: 401 })
     );
 
     const request = new NextRequest("http://localhost:3000/api/envelopes/1/transactions");
@@ -62,7 +71,7 @@ describe("/api/envelopes/[envelopeId]/transactions", () => {
   });
 
   it("validates envelope exists", async () => {
-    (mockPrisma.envelope.findUnique as any).mockResolvedValue(null);
+    mockPrisma.envelope.findUnique.mockResolvedValue(null);
 
     const request = new NextRequest("http://localhost:3000/api/envelopes/999/transactions");
     const response = await GET(request, { params: { envelopeId: "999" } });
@@ -88,9 +97,11 @@ describe("/api/envelopes/[envelopeId]/transactions", () => {
       },
     ];
 
-    (mockPrisma.envelope.findUnique as any).mockResolvedValue(mockEnvelope);
-    (mockPrisma.transaction.findMany as any).mockResolvedValue(mockTransactions);
-    (mockPrisma.transaction.count as any).mockResolvedValue(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.envelope.findUnique.mockResolvedValue(mockEnvelope as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.transaction.findMany.mockResolvedValue(mockTransactions as any);
+    mockPrisma.transaction.count.mockResolvedValue(1);
 
     const request = new NextRequest("http://localhost:3000/api/envelopes/1/transactions");
     const response = await GET(request, { params: { envelopeId: "1" } });
@@ -117,9 +128,11 @@ describe("/api/envelopes/[envelopeId]/transactions", () => {
   it("filters by month when provided", async () => {
     const mockEnvelope = { id: 1, name: "Food", percentage: 0.3 };
     
-    (mockPrisma.envelope.findUnique as any).mockResolvedValue(mockEnvelope);
-    (mockPrisma.transaction.findMany as any).mockResolvedValue([]);
-    (mockPrisma.transaction.count as any).mockResolvedValue(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.envelope.findUnique.mockResolvedValue(mockEnvelope as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.transaction.findMany.mockResolvedValue([] as any);
+    mockPrisma.transaction.count.mockResolvedValue(0);
 
     const request = new NextRequest("http://localhost:3000/api/envelopes/1/transactions?month=2025-02");
     await GET(request, { params: { envelopeId: "1" } });
@@ -130,9 +143,11 @@ describe("/api/envelopes/[envelopeId]/transactions", () => {
   it("applies pagination correctly", async () => {
     const mockEnvelope = { id: 1, name: "Food", percentage: 0.3 };
     
-    (mockPrisma.envelope.findUnique as any).mockResolvedValue(mockEnvelope);
-    (mockPrisma.transaction.findMany as any).mockResolvedValue([]);
-    (mockPrisma.transaction.count as any).mockResolvedValue(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.envelope.findUnique.mockResolvedValue(mockEnvelope as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.transaction.findMany.mockResolvedValue([] as any);
+    mockPrisma.transaction.count.mockResolvedValue(0);
 
     const request = new NextRequest("http://localhost:3000/api/envelopes/1/transactions?page=2&pageSize=10");
     await GET(request, { params: { envelopeId: "1" } });
@@ -157,9 +172,11 @@ describe("/api/envelopes/[envelopeId]/transactions", () => {
   it("only returns expense transactions (type OUT)", async () => {
     const mockEnvelope = { id: 1, name: "Food", percentage: 0.3 };
     
-    (mockPrisma.envelope.findUnique as any).mockResolvedValue(mockEnvelope);
-    (mockPrisma.transaction.findMany as any).mockResolvedValue([]);
-    (mockPrisma.transaction.count as any).mockResolvedValue(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.envelope.findUnique.mockResolvedValue(mockEnvelope as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.transaction.findMany.mockResolvedValue([] as any);
+    mockPrisma.transaction.count.mockResolvedValue(0);
 
     const request = new NextRequest("http://localhost:3000/api/envelopes/1/transactions");
     await GET(request, { params: { envelopeId: "1" } });
@@ -176,9 +193,11 @@ describe("/api/envelopes/[envelopeId]/transactions", () => {
   it("orders by date desc, createdAt desc", async () => {
     const mockEnvelope = { id: 1, name: "Food", percentage: 0.3 };
     
-    (mockPrisma.envelope.findUnique as any).mockResolvedValue(mockEnvelope);
-    (mockPrisma.transaction.findMany as any).mockResolvedValue([]);
-    (mockPrisma.transaction.count as any).mockResolvedValue(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.envelope.findUnique.mockResolvedValue(mockEnvelope as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.transaction.findMany.mockResolvedValue([] as any);
+    mockPrisma.transaction.count.mockResolvedValue(0);
 
     const request = new NextRequest("http://localhost:3000/api/envelopes/1/transactions");
     await GET(request, { params: { envelopeId: "1" } });

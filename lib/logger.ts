@@ -1,5 +1,4 @@
-import { writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { appendFileSync } from 'fs';
 
 type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 
@@ -27,6 +26,7 @@ class Logger {
     // }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private log(level: LogLevel, message: string, error?: unknown, data?: unknown) {
     // const entry: LogEntry = {
     //   level,
@@ -93,9 +93,6 @@ class Logger {
   // Helper method to clear debug logs
   clearDebugLogs() {
     // try {
-    //   if (existsSync(this.debugLogFile)) {
-    //     writeFileSync(this.debugLogFile, '');
-    //   }
     // } catch (error) {
     //   console.error('Failed to clear debug logs:', error);
     // }

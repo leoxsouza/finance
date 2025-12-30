@@ -444,7 +444,6 @@ async function persistInstallments(tx: CardImportTransactionClient, options: Per
   const { session, statementImportId, fallbackStatementMonth, purchaseRecords, userId, eventBuffer } = options;
   let createdInstallments = 0;
   let skippedInstallments = 0;
-  const seen = new Set<string>();
   const ignoredInstallments: Array<{
     cardPurchaseKey: string;
     installmentNumber: number;
