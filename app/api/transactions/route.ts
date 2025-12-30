@@ -4,28 +4,13 @@ import { z } from "zod";
 import prisma from "@/lib/db";
 import finance from "@/lib/finance";
 import { createSingleTransaction, createRecurringTransaction } from "./recurring-functions";
+import { transactionWithRecurringSchema, transactionUpdateSchema } from "./schemas";
 import {
   DEFAULT_TRANSACTIONS_PAGE,
   DEFAULT_TRANSACTIONS_PAGE_SIZE,
   TRANSACTION_PAGE_SIZE_OPTIONS,
   type TransactionPageSizeOption,
 } from "@/lib/transactions/constants";
-
-const dateStringSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/)
-  .refine((value) => !Number.isNaN(new Date(value).getTime()), {
-    message: "Invalid date",
-  });
-
-const transactionDeleteQuerySchema = z.object({
-  id: z
-    .string()
-    .transform((value) => Number(value))
-    .refine((value) => Number.isInteger(value) && value > 0, {
-      message: "id must be a positive integer",
-    }),
-});
 
 const transactionUpdateQuerySchema = z.object({
   id: z
@@ -36,51 +21,6 @@ const transactionUpdateQuerySchema = z.object({
     }),
 });
 
-const transactionUpdateSchema = z
-  .object({
-    date: dateStringSchema.optional(),
-    description: z.string().min(1, "Description is required").optional(),
-    value: z.number().positive("Value must be positive").optional(),
-    type: z.enum(["IN", "OUT"]).optional(),
-    envelopeId: z.number().int().positive().nullable().optional(),
-  })
-  .superRefine((payload, ctx) => {
-    // If updating type to OUT, envelopeId is required
-    if (payload.type === "OUT" && (payload.envelopeId === undefined || payload.envelopeId === null)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["envelopeId"],
-        message: "Envelope is required for expenses",
-      });
-    }
-  })
-  .refine((payload) => {
-    // At least one field must be provided for update
-    const fields = Object.keys(payload);
-    return fields.length > 0;
-  }, {
-    message: "At least one field must be provided for update",
-  });
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const transactionInputSchema = z
-  .object({
-    date: dateStringSchema,
-    description: z.string().min(1, "Description is required"),
-    value: z.number().positive("Value must be positive"),
-    type: z.enum(["IN", "OUT"]),
-    envelopeId: z.number().int().positive().optional(),
-  })
-  .superRefine((payload, ctx) => {
-    if (payload.type === "OUT" && !payload.envelopeId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["envelopeId"],
-        message: "Envelope is required for expenses",
-      });
-    }
-  });
-
 export async function DELETE(request: NextRequest) {
   const authError = await ensureApiAuthenticated();
   if (authError) {
@@ -88,7 +28,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const query = transactionDeleteQuerySchema.parse(Object.fromEntries(request.nextUrl.searchParams));
+    const query = transactionUpdateQuerySchema.parse(Object.fromEntries(request.nextUrl.searchParams));
 
     await prisma.transaction.delete({
       where: { id: query.id },
@@ -238,30 +178,6 @@ export async function GET(request: NextRequest) {
     return handleError(error);
   }
 }
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const recurringTransactionInputSchema = z.object({
-  isRecurring: z.boolean().default(false),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-});
-
-export const transactionWithRecurringSchema = z.object({
-  date: dateStringSchema,
-  description: z.string().min(1, "Description is required"),
-  value: z.number().positive("Value must be positive"),
-  type: z.enum(["IN", "OUT"]),
-  envelopeId: z.number().int().positive().optional(),
-  isRecurring: z.boolean().default(false),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-}).superRefine((payload, ctx) => {
-  if (payload.type === "OUT" && !payload.envelopeId) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["envelopeId"],
-      message: "Envelope is required for expenses",
-    });
-  }
-});
 
 export async function POST(request: NextRequest) {
   const authError = await ensureApiAuthenticated();

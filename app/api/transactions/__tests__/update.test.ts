@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi, type Mocked } from "vitest";
 import { PATCH } from "../route";
 import { NextRequest } from "next/server";
+import prisma from "@/lib/db";
 
 // Mock dependencies
 vi.mock("@/lib/auth/api", () => ({
@@ -20,12 +21,17 @@ vi.mock("@/lib/db", () => ({
 
 describe("PATCH /api/transactions", () => {
   let mockRequest: NextRequest;
-  let mockPrisma: any;
+  const mockPrisma = prisma as unknown as {
+    envelope: {
+      findUnique: Mocked<typeof prisma.envelope.findUnique>;
+    };
+    transaction: {
+      update: Mocked<typeof prisma.transaction.update>;
+    };
+  };
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    
-    mockPrisma = await import("@/lib/db").then(m => m.default);
     
     mockRequest = new NextRequest("http://localhost:3000/api/transactions?id=1", {
       method: "PATCH",
@@ -47,8 +53,10 @@ describe("PATCH /api/transactions", () => {
       Envelope: { name: "Test Envelope" },
     };
 
-    mockPrisma.envelope.findUnique.mockResolvedValue({ id: 1, name: "Test Envelope" });
-    mockPrisma.transaction.update.mockResolvedValue(updatedTransaction);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.envelope.findUnique.mockResolvedValue({ id: 1, name: "Test Envelope" } as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.transaction.update.mockResolvedValue(updatedTransaction as any);
 
     const response = await PATCH(mockRequest);
     const data = await response.json();
@@ -140,8 +148,10 @@ describe("PATCH /api/transactions", () => {
   });
 
   it("handles transaction not found", async () => {
-    mockPrisma.envelope.findUnique.mockResolvedValue({ id: 1, name: "Test Envelope" });
-    mockPrisma.transaction.update.mockRejectedValue(new Error("Record to update does not exist"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.envelope.findUnique.mockResolvedValue({ id: 1, name: "Test Envelope" } as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrisma.transaction.update.mockRejectedValue(new Error("Record to update does not exist") as any);
 
     const response = await PATCH(mockRequest);
     const data = await response.json();

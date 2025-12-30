@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { EditableSelectCell } from "./EditableSelectCell";
-import type { EnvelopeOption } from "@/app/transactions/types";
+import type { EnvelopeOption } from "@/types/transactions";
 
 type EditableEnvelopeCellProps = {
   value: number | null;

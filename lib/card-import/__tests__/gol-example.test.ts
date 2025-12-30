@@ -1,12 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildPurchaseKey, normalizeText } from "@/lib/card-import/keys";
+import { buildPurchaseKey } from "@/lib/card-import/keys";
 
 describe("Real-world Installment Deduplication - GOL Example", () => {
   it("should handle GOL installment variations across months", () => {
-    // Your real example
-    const novemberLine = "11/09 GOL LINHAS*AASUXN16048367 02/05 420,12";
-    const decemberLine = "11/09 GOL LINHAS*AASUXN16048367 03/05 420.10";
-    
     // Extract the core purchase information (this would normally be done by the AI/parser)
     const purchaseInfo = {
       description: "GOL LINHAS*AASUXN16048367",

@@ -5,7 +5,6 @@ import {
   AlertDialog,
   AlertDialogContent,
   AlertDialogDescription,
-  AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -58,7 +57,7 @@ export function EnvelopeTransactionsModal({
     if (isOpen) {
       fetchPage(1);
     }
-  }, [isOpen, envelopeId, month]); // fetchPage is stable from useCallback
+  }, [isOpen, fetchPage]); // fetchPage is stable from useCallback
 
   const monthDate = new Date(month + "-03T00:00:00Z");
 

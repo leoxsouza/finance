@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { z } from "zod";
-import { transactionWithRecurringSchema } from "./route";
+import { transactionWithRecurringSchema } from "./schemas";
 
 export const createSingleTransaction = async (payload: z.infer<typeof transactionWithRecurringSchema>) => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars

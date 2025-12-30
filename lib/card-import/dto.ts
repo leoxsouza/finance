@@ -35,7 +35,7 @@ type PurchaseSummaryRecord = Prisma.CardPurchaseGetPayload<{
 }>;
 
 type InstallmentRecord = Prisma.CardInstallmentGetPayload<{
-  include: {};
+  include: Record<string, never>;
 }>;
 
 const toNumber = (value: Prisma.Decimal | number | null | undefined): number | null => {
@@ -155,7 +155,7 @@ export const mapPurchaseToDTO = (purchase: PurchaseWithInstallments): CardPurcha
   installments: purchase.installments.map(mapInstallmentToDTO),
 });
 
-export const mapEventToDTO = (event: Prisma.CardImportEventGetPayload<{}>): CardImportEventDTO => ({
+export const mapEventToDTO = (event: Prisma.CardImportEventGetPayload<Record<string, never>>): CardImportEventDTO => ({
   id: event.id,
   eventType: event.eventType,
   createdAt: event.createdAt.toISOString(),
